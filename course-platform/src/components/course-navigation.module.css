@@ -1,0 +1,13 @@
+.sidebar { display: grid; gap: 4px; }
+.sidebar a { display: block; padding: 10px 0; color: var(--muted); font-size: 14px; text-decoration: none; }
+.sidebar a:hover { text-decoration: underline; }
+.sidebar a[aria-current] { color: var(--accent); font-weight: 600; }
+.mobile { display: none; }
+@media (max-width: 740px) {
+  .desktop { display: none; }
+  .mobile { display: block; border-bottom: 1px solid var(--line); }
+  .mobile > summary { min-height: 48px; padding-block: 12px; color: var(--accent); font-size: 14px; cursor: pointer; }
+  .mobile > summary > span { margin-left: 20px; color: var(--muted); font-size: 13px; }
+  .sidebar { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; padding-bottom: 12px; }
+  .sidebar a { min-height: 44px; }
+}

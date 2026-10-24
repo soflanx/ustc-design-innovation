@@ -1,0 +1,21 @@
+# Local previews and earlier drafts
+/output/
+/static-site/
+/tmp/
+
+# Dependencies, generated files and local data
+node_modules/
+.next/
+.local/
+*.tsbuildinfo
+coverage/
+artifacts/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+
+# Keep only the documented environment template
+.env
+.env.*
+!.env.example

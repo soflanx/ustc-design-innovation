@@ -1,0 +1,28 @@
+.page { padding-block: 32px 72px; }
+.selectionHeader { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 32px; }
+.selectionHeader h1 { font-size: 30px; font-weight: 600; line-height: 1.45; }
+.courseGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 44px; }
+.courseCard { min-width: 0; border-top: 1px solid var(--line); }
+.courseEntry { display: flex; justify-content: space-between; gap: 24px; padding-block: 24px; text-decoration: none; color: var(--ink); }
+.courseEntry:hover { text-decoration: none; }
+.courseEntry:hover h2 { text-decoration: underline; }
+.courseEntry h2 { font-size: 23px; font-weight: 600; }
+.courseEntry p { margin-top: 10px; font-size: 14px; color: var(--muted); }
+.courseEntry > span { color: var(--accent); align-self: center; }
+.draftSection { margin-top: 36px; }
+.draftSection > h2 { font-size: 20px; margin-bottom: 20px; }
+.archiveSection { margin-top: 36px; }
+.archiveSection > summary { font-size: 16px; color: var(--muted); padding-block: 10px; width: fit-content; }
+.archiveRows { margin-top: 14px; }
+.archiveRow { display: flex; justify-content: space-between; gap: 24px; padding-block: 20px; border-top: 1px solid var(--line); }
+.archiveRow a { font-size: 18px; }
+.archiveRow p, .archiveRow > span { margin-top: 6px; font-size: 13px; color: var(--muted); }
+.emptyPanel { padding: 24px 0; border-top: 1px solid var(--line); }
+.emptyPanel p, .quietEmpty { color: var(--muted); font-size: 15px; line-height: 1.8; }
+.emptyPanel a { display: inline-block; margin-top: 16px; font-size: 14px; }
+@media(max-width:740px) {
+  .page { padding-block: 24px 56px; }
+  .selectionHeader h1 { font-size: 26px; }
+  .courseGrid { grid-template-columns: minmax(0, 1fr); }
+  .courseEntry h2 { font-size: 22px; }
+}

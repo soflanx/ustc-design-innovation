@@ -1,0 +1,19 @@
+.page { max-width: 820px; padding-block: 56px 80px; }
+.heading { margin-bottom: 32px; }
+.heading h1 { font-family: var(--display); font-size: 36px; font-weight: 600; }
+.heading p { margin-top: 14px; color: var(--muted); font-size: 14px; }
+.currentAccount { border-left: 2px solid var(--accent); padding-left: 16px; margin-bottom: 30px; font-size: 14px; }
+.currentAccount a { display: inline-block; margin-left: 12px; }
+.accounts { border-top: 1px solid var(--line); }
+.account { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 24px; padding-block: 24px; border-bottom: 1px solid var(--line); }
+.account h2 { font-size: 18px; font-weight: 600; }
+.account p { margin-top: 7px; color: var(--muted); font-size: 14px; }
+.account button { display: inline-flex; align-items: center; gap: 24px; min-height: 44px; padding: 8px 0 8px 20px; border: 0; background: transparent; color: var(--accent); font-size: 14px; white-space: nowrap; }
+.account button:hover { text-decoration: underline; }
+@media (max-width: 700px) {
+  .page { padding-block: 36px 56px; }
+  .heading h1 { font-size: 30px; }
+  .account { align-items: start; gap: 18px; padding-block: 22px; }
+  .account button { gap: 12px; padding-left: 0; }
+  .currentAccount a { margin: 6px 0 0; display: block; }
+}

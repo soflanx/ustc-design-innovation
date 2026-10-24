@@ -1,0 +1,33 @@
+.frame { display: grid; grid-template-columns: 148px minmax(0, 1fr); column-gap: 44px; align-items: start; padding-block: 40px 72px; }
+.navigation { position: sticky; top: 24px; min-width: 0; }
+.content { min-width: 0; }
+.content > div { min-width: 0; }
+.content :global(.page-heading) { margin: 0 0 28px; }
+.content :global(.page-heading h1) { font-family: var(--sans); font-size: 30px; font-weight: 600; line-height: 1.45; }
+.content :global(.stack) { gap: 28px; }
+.content > :global(.stack) > :global(.page-heading) { margin-bottom: 0; }
+.content :global(.split-layout) { grid-template-columns: minmax(0, 1fr); }
+.content :global(.panel > summary) { width: fit-content; padding-block: 8px; color: var(--accent); font-size: 16px; font-weight: 500; }
+.teamList { margin-top: 28px; border-top: 1px solid var(--line); }
+.teamRow { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 24px; padding-block: 20px; border-bottom: 1px solid var(--line); }
+.teamRow > p { color: var(--muted); font-size: 14px; padding-top: 3px; }
+.teamRow h2 { font-size: 18px; font-weight: 500; }
+.teamRow a { display: inline-block; margin-top: 6px; font-size: 14px; }
+@media (max-width: 900px) {
+  .frame { grid-template-columns: 124px minmax(0, 1fr); column-gap: 28px; padding-top: 32px; }
+}
+@media (max-width: 740px) {
+  .frame { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-block: 0 56px; }
+  .navigation { position: static; }
+  .content :global(.page-heading h1) { font-size: 26px; }
+  .teamRow { grid-template-columns: 52px minmax(0, 1fr); gap: 18px; }
+  .memberTable { min-width: 0; width: 100%; }
+  .memberTable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .memberTable tbody, .memberTable tr { display: block; }
+  .memberTable tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 20px; padding-block: 18px; border-bottom: 1px solid var(--line); }
+  .memberTable td { display: block; padding: 0; border: 0; white-space: normal; font-size: 13px; }
+  .memberTable td:first-child { grid-column: 1 / -1; font-size: 15px; font-weight: 500; }
+  .memberTable td[data-label]::before { content: attr(data-label); margin-right: 10px; color: var(--muted); }
+  .memberTable td:last-child { grid-column: 1 / -1; }
+  .memberTable td[data-group-applicable=false] { display: none; }
+}

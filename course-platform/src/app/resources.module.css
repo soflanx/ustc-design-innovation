@@ -1,0 +1,33 @@
+.page { min-width: 0; }
+.heading { margin-bottom: 24px; }
+.heading h1 { margin: 10px 0 0; font-size: 30px; line-height: 1.4; overflow-wrap: anywhere; }
+.notice { padding: 14px 18px; background: var(--surface-muted); color: #42565c; }
+.search { display: flex; align-items: center; gap: 12px; margin: 24px 0 0; max-width: 620px; }
+.search input { min-width: 0; flex: 1; }
+.search button, .search a { flex-shrink: 0; font-size: 14px; }
+.searchCount { margin-top: 16px; color: #5f6e76; font-size: 14px; }
+.editor { margin: 24px 0; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+.editor > summary { padding: 18px 22px; cursor: pointer; color: var(--accent); font-weight: 600; }
+.editorBody { max-width: 800px; padding: 0 24px 24px; }
+.list { margin-top: 28px; border-top: 1px solid var(--line); }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 24px; padding: 24px 0; border-bottom: 1px solid var(--line); }
+.row:last-child { border-bottom: 0; }
+.row h2 { margin: 0 0 8px; font-size: 20px; line-height: 1.5; }
+.row p { margin: 0; font-size: 15px; line-height: 1.7; color: #5f6e76; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.status { color: #5f6e76; font-size: 14px; white-space: nowrap; }
+.openLink { color: var(--accent); font-size: 14px; white-space: nowrap; }
+.empty { margin: 0; padding: 32px 0; color: var(--muted); }
+.reading { margin-top: 28px; max-width: 800px; padding-block: 8px 30px; }
+.reading > .status { margin: 0 0 20px; }
+.body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 16px; line-height: 1.9; }
+.external { margin-bottom: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+.external p { margin: 10px 0 0; color: #5f6e76; font-size: 13px; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .heading h1 { font-size: 26px; }
+  .row { grid-template-columns: 1fr auto; gap: 12px; padding: 22px 0; }
+  .row > div { grid-column: 1 / -1; }
+  .row h2 { font-size: 19px; }
+  .openLink { justify-self: end; }
+  .reading { padding-block: 8px 22px; }
+  .editorBody { padding: 0 20px 20px; }
+}

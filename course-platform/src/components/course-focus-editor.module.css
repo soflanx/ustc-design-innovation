@@ -1,0 +1,24 @@
+.editor { max-width: 800px; margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
+.editor > details > summary { width: fit-content; max-width: 100%; padding-block: 7px; color: var(--accent); font-size: 14px; cursor: pointer; }
+.content { padding-top: 22px; }
+.form, .fields { display: grid; gap: 24px; }
+.fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.fields textarea { min-height: 210px; font-size: 16px; line-height: 1.85; }
+.fields input[type=text] { font-size: 16px; }
+.related { display: grid; gap: 22px; }
+.help, .empty { color: var(--muted); font-size: 13px; line-height: 1.7; }
+.options { min-width: 0; margin: 0; padding: 0; border: 0; }
+.options legend { margin-bottom: 12px; padding: 0; color: var(--ink); font-size: 15px; font-weight: 600; }
+.choices { display: grid; gap: 8px; }
+.choice { display: flex; align-items: flex-start; gap: 10px; min-height: 36px; padding-block: 5px; color: var(--ink); font-size: 14px; line-height: 1.7; cursor: pointer; }
+.choice input { flex-shrink: 0; width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--accent); }
+.choice > span { min-width: 0; }
+.choice small { display: inline-block; margin-left: 12px; color: var(--muted); font-size: 13px; }
+@media (max-width: 740px) {
+  .editor { margin-top: 22px; }
+  .editor > details > summary { min-height: 44px; padding-block: 10px; }
+  .content { padding-top: 18px; }
+  .choice { min-height: 44px; padding-block: 8px; }
+  .choice small { margin-left: 8px; }
+  .form :global(.button) { min-height: 44px; }
+}

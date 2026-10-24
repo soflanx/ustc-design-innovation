@@ -1,0 +1,428 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TermStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum MemberRole {
+  STUDENT
+  TA
+  TEACHER
+}
+
+enum MemberStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum Visibility {
+  PUBLIC
+  OFFERING
+}
+
+enum PostType {
+  NEWS
+  PROJECT
+}
+
+enum GradeStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum AssignmentMode {
+  INDIVIDUAL
+  GROUP
+}
+
+model User {
+  id          String         @id @default(cuid())
+  email       String         @unique
+  name        String
+  isAdmin     Boolean        @default(false)
+  isDemo      Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  staff       CourseStaff[]
+  memberships CourseMember[]
+  sessions    AuthSession[]
+  posts       Post[]
+  files       FileObject[]
+}
+
+model AuthSession {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+model Course {
+  id          String           @id @default(cuid())
+  slug        String           @unique
+  title       String
+  description String           @default("")
+  staff       CourseStaff[]
+  offerings   CourseOffering[]
+}
+
+model CourseStaff {
+  courseId String
+  userId   String
+  role     MemberRole @default(TEACHER)
+  course   Course     @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user     User       @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@id([courseId, userId])
+}
+
+model Term {
+  id        String           @id @default(cuid())
+  slug      String           @unique
+  name      String
+  status    TermStatus       @default(DRAFT)
+  startDate DateTime
+  endDate   DateTime
+  offerings CourseOffering[]
+}
+
+model CourseOffering {
+  id          String         @id @default(cuid())
+  courseId    String
+  termId      String
+  title       String
+  description String         @default("")
+  status      TermStatus     @default(DRAFT)
+  course      Course         @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  term        Term           @relation(fields: [termId], references: [id], onDelete: Restrict)
+  members     CourseMember[]
+  groups      Group[]
+  assignments Assignment[]
+  resources   Resource[]
+  posts       Post[]
+  notes       TeachingNote[]
+  focus       CourseFocus?
+
+  files FileObject[]
+
+  @@unique([courseId, termId])
+}
+
+model CourseMember {
+  id               String                  @id @default(cuid())
+  offeringId       String
+  userId           String
+  role             MemberRole
+  status           MemberStatus            @default(ACTIVE)
+  joinedAt         DateTime                @default(now())
+  offering         CourseOffering          @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+  user             User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  groupMemberships GroupMember[]
+  taAssignments    TaGroupAssignment[]
+  submissions      Submission[]
+  participants     SubmissionParticipant[]
+  reviews          Review[]
+  grades           GradeRecord[]
+
+  uploadedVersions SubmissionVersion[] @relation("SubmittedBy")
+  updatedGrades    GradeRecord[]       @relation("GradeUpdater")
+  gradeChanges     GradeHistory[]
+  notes            TeachingNote[]
+
+  @@unique([offeringId, userId])
+  @@unique([id, offeringId])
+  @@index([offeringId, role, status])
+}
+
+model Group {
+  id            String              @id @default(cuid())
+  offeringId    String
+  name          String
+  description   String              @default("")
+  offering      CourseOffering      @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+  members       GroupMember[]
+  taAssignments TaGroupAssignment[]
+  submissions   Submission[]
+  page          GroupPage?
+
+  @@unique([offeringId, name])
+  @@unique([id, offeringId])
+}
+
+model GroupMember {
+  id             String       @id @default(cuid())
+  offeringId     String
+  groupId        String
+  courseMemberId String
+  joinedAt       DateTime     @default(now())
+  leftAt         DateTime?
+  group          Group        @relation(fields: [groupId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  courseMember   CourseMember @relation(fields: [courseMemberId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@index([groupId, leftAt])
+  @@index([courseMemberId, joinedAt])
+}
+
+model TaGroupAssignment {
+  id             String       @id @default(cuid())
+  offeringId     String
+  groupId        String
+  courseMemberId String
+  assignedAt     DateTime     @default(now())
+  endedAt        DateTime?
+  group          Group        @relation(fields: [groupId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  courseMember   CourseMember @relation(fields: [courseMemberId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@index([courseMemberId, endedAt])
+}
+
+model Assignment {
+  id          String         @id @default(cuid())
+  offeringId  String
+  title       String
+  description String         @default("")
+  mode        AssignmentMode
+  status      ContentStatus  @default(DRAFT)
+  dueAt       DateTime?
+  maxScore    Decimal        @default(100) @db.Decimal(8, 2)
+  offering    CourseOffering @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+  submissions Submission[]
+  grades      GradeRecord[]
+  focusLinks  CourseFocusAssignment[]
+
+  @@unique([id, offeringId])
+  @@index([offeringId, status])
+}
+
+model Submission {
+  id             String              @id @default(cuid())
+  offeringId     String
+  assignmentId   String
+  courseMemberId String?
+  groupId        String?
+  assignment     Assignment          @relation(fields: [assignmentId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  courseMember   CourseMember?       @relation(fields: [courseMemberId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  group          Group?              @relation(fields: [groupId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  versions       SubmissionVersion[]
+
+  @@unique([id, offeringId])
+  @@unique([assignmentId, courseMemberId])
+  @@unique([assignmentId, groupId])
+}
+
+model SubmissionVersion {
+  id           String                  @id @default(cuid())
+  offeringId   String
+  submissionId String
+  version      Int
+  body         String
+  submittedAt  DateTime                @default(now())
+  submission   Submission              @relation(fields: [submissionId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  participants SubmissionParticipant[]
+  files        SubmissionFile[]
+  reviews      Review[]
+
+  submittedById String
+  finalizedAt   DateTime?
+  submittedBy   CourseMember @relation("SubmittedBy", fields: [submittedById, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@unique([submissionId, version])
+  @@unique([id, offeringId])
+}
+
+model SubmissionParticipant {
+  offeringId     String
+  versionId      String
+  courseMemberId String
+  version        SubmissionVersion @relation(fields: [versionId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  courseMember   CourseMember      @relation(fields: [courseMemberId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@id([versionId, courseMemberId])
+}
+
+model Review {
+  id         String            @id @default(cuid())
+  offeringId String
+  versionId  String
+  reviewerId String
+  body       String
+  score      Decimal?          @db.Decimal(8, 2)
+  createdAt  DateTime          @default(now())
+  version    SubmissionVersion @relation(fields: [versionId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  reviewer   CourseMember      @relation(fields: [reviewerId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  grades GradeRecord[]
+
+  @@unique([id, offeringId])
+  @@index([versionId, createdAt])
+}
+
+model GradeRecord {
+  id             String         @id @default(cuid())
+  offeringId     String
+  assignmentId   String
+  courseMemberId String
+  score          Decimal        @db.Decimal(8, 2)
+  status         GradeStatus    @default(DRAFT)
+  publishedAt    DateTime?
+  reviewId       String
+  updatedById    String
+  updatedAt      DateTime       @updatedAt
+  assignment     Assignment     @relation(fields: [assignmentId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  courseMember   CourseMember   @relation(fields: [courseMemberId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  review         Review         @relation(fields: [reviewId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  updatedBy      CourseMember   @relation("GradeUpdater", fields: [updatedById, offeringId], references: [id, offeringId], onDelete: Restrict)
+  history        GradeHistory[]
+
+  @@unique([assignmentId, courseMemberId])
+  @@unique([id, offeringId])
+}
+
+model GradeHistory {
+  id            String       @id @default(cuid())
+  offeringId    String
+  gradeRecordId String
+  actorId       String
+  previousScore Decimal?     @db.Decimal(8, 2)
+  score         Decimal      @db.Decimal(8, 2)
+  status        GradeStatus
+  reason        String
+  recordedAt    DateTime     @default(now())
+  gradeRecord   GradeRecord  @relation(fields: [gradeRecordId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  actor         CourseMember @relation(fields: [actorId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@index([gradeRecordId, recordedAt])
+}
+
+model FileObject {
+  offeringId   String
+  offering     CourseOffering   @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+  id           String           @id @default(cuid())
+  ownerId      String
+  storageKey   String           @unique
+  originalName String
+  mimeType     String
+  sizeBytes    BigInt
+  createdAt    DateTime         @default(now())
+  owner        User             @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  submissions  SubmissionFile[]
+
+  @@unique([id, offeringId])
+}
+
+model SubmissionFile {
+  offeringId String
+  versionId  String
+  fileId     String
+  version    SubmissionVersion @relation(fields: [versionId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  file       FileObject        @relation(fields: [fileId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@id([versionId, fileId])
+}
+
+model Resource {
+  id         String         @id @default(cuid())
+  offeringId String
+  title      String
+  body       String
+  url        String?
+  status     ContentStatus  @default(DRAFT)
+  visibility Visibility     @default(OFFERING)
+  offering   CourseOffering @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+  focusLinks CourseFocusResource[]
+
+  @@unique([id, offeringId])
+  @@index([offeringId, status])
+}
+
+model CourseFocus {
+  offeringId  String                  @id
+  title       String
+  body        String                  @default("")
+  updatedAt   DateTime                @updatedAt
+  offering    CourseOffering          @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+  assignments CourseFocusAssignment[]
+  resources   CourseFocusResource[]
+}
+
+model CourseFocusAssignment {
+  offeringId   String
+  assignmentId String
+  focus        CourseFocus @relation(fields: [offeringId], references: [offeringId], onDelete: Cascade)
+  assignment   Assignment  @relation(fields: [assignmentId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@id([offeringId, assignmentId])
+}
+
+model CourseFocusResource {
+  offeringId String
+  resourceId String
+  focus      CourseFocus @relation(fields: [offeringId], references: [offeringId], onDelete: Cascade)
+  resource   Resource    @relation(fields: [resourceId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@id([offeringId, resourceId])
+}
+
+model Post {
+  id          String          @id @default(cuid())
+  offeringId  String?
+  authorId    String
+  title       String
+  slug        String          @unique
+  coverLabel  String          @default("示例内容")
+  excerpt     String          @default("")
+  body        String
+  type        PostType
+  status      ContentStatus   @default(DRAFT)
+  visibility  Visibility      @default(OFFERING)
+  publishedAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  offering    CourseOffering? @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+  author      User            @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([status, visibility, publishedAt])
+  @@index([offeringId, type])
+}
+
+model GroupPage {
+  id         String        @id @default(cuid())
+  offeringId String
+  groupId    String        @unique
+  title      String
+  body       String
+  status     ContentStatus @default(DRAFT)
+  visibility Visibility    @default(OFFERING)
+  group      Group         @relation(fields: [groupId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@unique([groupId, offeringId])
+}
+
+model TeachingNote {
+  courseMemberId String
+  author         CourseMember   @relation(fields: [courseMemberId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  id             String         @id @default(cuid())
+  offeringId     String
+  title          String
+  body           String
+  createdAt      DateTime       @default(now())
+  offering       CourseOffering @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+}

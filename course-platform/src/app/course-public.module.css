@@ -1,0 +1,40 @@
+.catalogHeading,.offeringHeading{padding:38px 0 32px}
+.catalogHeading h1,.offeringHeading h1{font-family:var(--display);font-size:clamp(2rem,3.5vw,2.625rem);font-weight:600;color:var(--ink);line-height:1.3}
+.catalogBody{padding-block:12px 72px}
+/* The directory is an entry to a specific course and term, not a second introduction. */
+.catalogEntries{border-top:1px solid var(--line)}
+.catalogEntry{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:32px;padding:28px 0;border-bottom:1px solid var(--line);text-decoration:none;color:var(--ink)}
+.catalogEntry h2{font-family:var(--sans);font-size:26px;font-weight:600;line-height:1.45}
+.catalogEntry:hover{text-decoration:none}
+.catalogEntry:hover h2{text-decoration:underline;text-underline-offset:6px}
+.entryTerm{font-size:16px;color:var(--ink);margin-top:10px}
+.entryDates{font-size:13px;color:var(--muted);margin-top:8px}
+.entryAction{display:inline-flex;gap:22px;align-items:center;color:var(--accent);font-size:14px;white-space:nowrap}
+.catalogArchive{margin-top:36px}
+.catalogArchive>summary{width:fit-content;color:var(--muted);font-size:15px;padding-block:10px;cursor:pointer}
+.catalogArchive[open]>summary{margin-bottom:14px}
+.historicalEntry h2{font-size:19px;font-weight:500}
+.historicalEntry .entryTerm{font-size:14px;margin-top:7px}
+.offeringBack{display:inline-block;margin-bottom:22px;color:var(--muted);font-size:13px;text-decoration:none}
+.offeringBack:hover{text-decoration:underline}
+.offeringHeading h1{margin-bottom:14px}
+.offeringHeading p{font-size:16px;color:var(--muted)}
+.offeringBody{padding-block:12px 80px}
+.offeringLayout{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(250px,1fr);gap:64px;align-items:start}
+.offeringIntroduction{margin-bottom:32px}
+.offeringIntroduction h2{font-family:var(--display);font-size:25px;font-weight:600;margin-bottom:18px;color:var(--ink)}
+.offeringIntroduction p{white-space:pre-wrap;font-size:17px;line-height:1.95;color:var(--ink);max-width:42em}
+.offeringNotes{border-top:1px solid var(--line);padding-top:24px;margin-top:30px}
+.offeringNotes h2{font-size:16px;font-weight:600;margin-bottom:14px}
+.offeringNotes p{white-space:pre-wrap;font-size:16px;line-height:1.9;color:var(--muted)}
+.offeringSidebar{padding:0 0 0 28px;border-left:1px solid var(--line)}
+.offeringSidebar h2{font-size:16px;font-weight:600;color:var(--ink);margin:0 0 22px}
+.offeringSidebar dl{margin:0 0 26px}
+.offeringSidebar dl>div+div{margin-top:20px}
+.offeringSidebar dt{font-size:13px;color:var(--muted);margin-bottom:6px}
+.offeringSidebar dd{margin:0;font-size:15px;line-height:1.8;color:var(--ink)}
+.offeringSidebar a{font-size:14px}
+.offeringSidebar :global(.field-help){margin-top:16px;line-height:1.8}
+.offeringArchive{font-size:14px;color:var(--muted);margin-bottom:22px}
+@media(max-width:800px){.offeringLayout{gap:30px;grid-template-columns:minmax(0,1.6fr) minmax(220px,1fr)}.offeringSidebar{padding-left:22px}}
+@media(max-width:620px){.catalogHeading,.offeringHeading{padding-block:28px 26px}.catalogBody{padding-top:4px}.catalogEntry{grid-template-columns:minmax(0,1fr);gap:20px;padding-block:24px}.catalogEntry h2{font-size:25px}.entryAction{min-height:36px;gap:16px}.catalogArchive{margin-top:28px}.historicalEntry h2{font-size:19px}.offeringLayout{grid-template-columns:1fr;gap:28px}.offeringSidebar{padding:24px 0 0;border-left:0;border-top:1px solid var(--line)}.offeringBody{padding-top:0}}

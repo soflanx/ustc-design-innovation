@@ -1,0 +1,73 @@
+{
+  "retrievedAt": "2026-10-20",
+  "license": {
+    "name": "Pexels License",
+    "url": "https://www.pexels.com/license/",
+    "summary": "Free website and commercial use; modifications allowed; attribution appreciated but not required. Do not imply endorsement by pictured people or brands."
+  },
+  "originalIllustrations": [
+    {
+      "file": "campus-wayfinding.svg",
+      "note": "为本次前端样稿绘制的校园导览原型示意；非真实校园地图或学生作品。"
+    }
+  ],
+  "assets": [
+    {
+      "file": "studio-hero.jpg",
+      "author": "Ron Lach",
+      "sourceUrl": "https://www.pexels.com/photo/architect-working-on-model-9618131/",
+      "downloadUrl": "https://images.pexels.com/photos/9618131/pexels-photo-9618131.jpeg?auto=compress&cs=tinysrgb&w=2400",
+      "width": 2400,
+      "height": 1600,
+      "note": "真实建筑模型制作场景；仅作为课程门户示意素材，不代表本站师生或项目。"
+    },
+    {
+      "file": "design-workshop.jpg",
+      "author": "Gu Ko",
+      "sourceUrl": "https://www.pexels.com/photo/art-students-engaged-in-creative-workshop-35376319/",
+      "downloadUrl": "https://images.pexels.com/photos/35376319/pexels-photo-35376319.jpeg?auto=compress&cs=tinysrgb&w=1400",
+      "width": 1400,
+      "height": 1071,
+      "note": "创作工作坊场景；仅作为课程门户示意素材，不代表本站师生或项目。"
+    },
+    {
+      "file": "architectural-model.jpg",
+      "author": "Tima Miroshnichenko",
+      "sourceUrl": "https://www.pexels.com/photo/a-model-of-a-building-on-a-table-6614835/",
+      "downloadUrl": "https://images.pexels.com/photos/6614835/pexels-photo-6614835.jpeg?auto=compress&cs=tinysrgb&w=1600",
+      "width": 1600,
+      "height": 1067,
+      "note": "建筑纸模场景；仅作为课程门户示意素材，不代表本站学生作品。"
+    },
+    {
+      "file": "student-presentation.jpg",
+      "author": "Kampus Production",
+      "sourceUrl": "https://www.pexels.com/photo/young-student-making-presentation-to-classmates-and-teacher-5940831/",
+      "downloadUrl": "https://images.pexels.com/photos/5940831/pexels-photo-5940831.jpeg?auto=compress&cs=tinysrgb&w=1600",
+      "width": 1600,
+      "height": 1067,
+      "note": "学生分享与汇报场景示意；仅作为课程门户素材，不代表 USTC 师生、合作院校或真实课程活动。",
+      "retrievedAt": "2026-10-24"
+    },
+    {
+      "file": "student-discussion.jpg",
+      "author": "Andy Barbour",
+      "sourceUrl": "https://www.pexels.com/photo/students-having-conversation-inside-the-classroom-6683485/",
+      "downloadUrl": "https://images.pexels.com/photos/6683485/pexels-photo-6683485.jpeg?auto=compress&cs=tinysrgb&w=1600",
+      "width": 1600,
+      "height": 1067,
+      "note": "学生小组讨论场景示意；仅作为课程门户素材，不代表 USTC 师生、合作院校或真实课程活动。",
+      "retrievedAt": "2026-10-24"
+    },
+    {
+      "file": "campus-conversation.jpg",
+      "author": "Zen Chung",
+      "sourceUrl": "https://www.pexels.com/photo/multiethnic-students-discussing-homework-in-campus-5538600/",
+      "downloadUrl": "https://images.pexels.com/photos/5538600/pexels-photo-5538600.jpeg?auto=compress&cs=tinysrgb&w=1600",
+      "width": 1600,
+      "height": 790,
+      "note": "校园同行交流场景示意；仅作为课程门户素材，不代表 USTC 师生、合作院校或真实课程活动。",
+      "retrievedAt": "2026-10-24"
+    }
+  ]
+}

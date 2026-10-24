@@ -1,0 +1,5 @@
+.form{display:grid;gap:18px}.form textarea{font-size:16px;line-height:1.85;min-height:260px}.editorMeta{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-top:6px;font-size:13px;color:#5f6e76}.editorMeta p{margin:0}.editorMeta>span{white-space:nowrap}.draftStatus{color:#5f6e76}.warning{color:#8a482e}.form :global(.button){min-height:40px}@media(max-width:740px){.editorMeta{flex-wrap:wrap;gap:6px}.form :global(.button){min-height:44px}}
+
+.groupWarning{background:#fbf5e9;padding:16px 18px;border-radius:4px;font-size:14px;color:#5d563d}.groupWarning p{margin:0;line-height:1.8}.confirmGroup{display:flex;align-items:flex-start;gap:10px;margin-top:12px;font-size:14px;cursor:pointer}.confirmGroup input{width:18px;height:18px;flex-shrink:0;margin-top:4px}
+
+.savedDraft{display:grid;gap:16px}.savedDraft h3{font-size:16px;font-weight:600;color:var(--ink);margin:0}.savedDraft textarea{font-size:16px;line-height:1.85;min-height:220px}.readOnlyReason{font-size:14px;line-height:1.8;color:#5f6e76}.savedDraft :global(.button){min-height:40px}@media(max-width:740px){.savedDraft :global(.button){min-height:44px}}
