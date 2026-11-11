@@ -1,0 +1,66 @@
+.entries {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px 24px;
+  min-width: 0;
+}
+.entries:empty { display: none; }
+.entries > details { min-width: 0; }
+.entries > details[open] { flex-basis: 100%; }
+.entry { min-width: 0; }
+.summary {
+  width: fit-content;
+  min-height: 44px;
+  padding-block: 10px;
+  color: var(--accent);
+  font-size: 14px;
+}
+.form, .students, .field { display: grid; gap: 10px; min-width: 0; }
+.form { margin: 8px 0 4px; }
+.field { gap: 4px; font-weight: 500; }
+.field input, .field textarea {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  background: white;
+  font: inherit;
+}
+.field input { min-height: 44px; }
+.field textarea { resize: vertical; }
+.help { margin: 0; color: var(--muted); font-size: 14px; }
+.kinds { min-width: 0; margin: 0; padding: 0; border: 0; }
+.kinds legend, .selected p { font-weight: 500; }
+.kinds > div { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.kinds label, .roster label { display: flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; }
+.kinds input, .roster input { margin: 0; flex: none; }
+.selected p, .selected ul, .roster { margin: 0; }
+.selected ul, .roster { list-style: none; padding: 0; }
+.selected ul { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.selected button {
+  display: inline-flex;
+  min-height: 44px;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.selected button:disabled { opacity: .55; cursor: default; }
+.roster { max-height: 14rem; overflow: auto; border-block: 1px solid var(--line); }
+.roster li + li { border-top: 1px solid var(--line); }
+.roster label { flex-wrap: wrap; padding-inline: 8px; overflow-wrap: anywhere; }
+.roster label:focus-within { background: var(--paper); }
+.roster small { color: var(--muted); }
+.form :global(.button) { min-height: 44px; }

@@ -5,6 +5,44 @@ import { db } from '../src/lib/db';
 
 after(async () => { await db.$disconnect(); });
 
+test('内部观察与外发收件历史保持对象和开课边界，不能事后改写或删除', async () => {
+  const f = await fixture(); const other = await fixture();
+  const base = { offeringId: f.offering.id, authorUserId: f.teacher.userId, body: '虚构现场观察', requestId: randomUUID() };
+  await assert.rejects(db.teachingObservation.create({ data: base }));
+  await assert.rejects(db.teachingObservation.create({ data: { ...base, targetMemberId: f.student.id, targetGroupId: f.group.id } }));
+  await assert.rejects(db.teachingObservation.create({ data: { ...base, targetMemberId: other.student.id } }));
+  const observation = await db.teachingObservation.create({ data: { ...base, targetMemberId: f.student.id } });
+  await assert.rejects(db.teachingObservation.update({ where: { id: observation.id }, data: { targetMemberId: f.teacher.id } }));
+  await assert.rejects(db.teachingObservation.delete({ where: { id: observation.id } }));
+  const feedback = await db.teachingFeedback.create({ data: { ...base, requestId: randomUUID(), targetGroupId: f.group.id } });
+  await assert.rejects(db.teachingFeedbackRecipient.create({ data: { offeringId: f.offering.id, feedbackId: feedback.id, memberId: other.student.id } }));
+  await db.teachingFeedbackRecipient.create({ data: { offeringId: f.offering.id, feedbackId: feedback.id, memberId: f.student.id } });
+  await assert.rejects(db.teachingFeedback.update({ where: { id: feedback.id }, data: { body: '替换已发内容' } }));
+  await assert.rejects(db.teachingFeedbackRecipient.delete({ where: { feedbackId_memberId: { feedbackId: feedback.id, memberId: f.student.id } } }));
+  assert.equal((await db.teachingObservation.findUniqueOrThrow({ where: { id: observation.id } })).targetMemberId, f.student.id);
+});
+
+test('未分组学生仅有现场观察或反馈时，仍不能改写其学生身份及教学作者身份', async () => {
+  for (const kind of ['observation', 'personal-feedback', 'group-recipient'] as const) {
+    const f = await fixture();
+    const base = { offeringId: f.offering.id, authorUserId: f.teacher.userId, body: '仅有文字的虚构现场记录', requestId: randomUUID() };
+    if (kind === 'observation') {
+      await db.teachingObservation.create({ data: { ...base, targetMemberId: f.student.id } });
+    } else {
+      const feedback = await db.teachingFeedback.create({ data: {
+        ...base,
+        ...(kind === 'personal-feedback' ? { targetMemberId: f.student.id } : { targetGroupId: f.group.id }),
+      } });
+      if (kind === 'group-recipient') await db.teachingFeedbackRecipient.create({ data: { offeringId: f.offering.id, feedbackId: feedback.id, memberId: f.student.id } });
+    }
+    assert.equal(await db.groupMember.count({ where: { courseMemberId: f.student.id } }), 0);
+    assert.equal(await db.submission.count({ where: { courseMemberId: f.student.id } }), 0);
+    await assert.rejects(db.courseMember.update({ where: { id: f.student.id }, data: { role: 'TA' } }), /Cannot change role/);
+    await assert.rejects(db.courseMember.update({ where: { id: f.teacher.id }, data: { role: 'STUDENT' } }), /Cannot change role/);
+    assert.equal((await db.courseMember.findUniqueOrThrow({ where: { id: f.student.id } })).role, 'STUDENT');
+  }
+});
+
 // The root test runner supplies a freshly migrated, isolated test database.
 // These fixtures never connect to another URL or create/drop databases.
 async function fixture() {
@@ -62,6 +100,9 @@ test('草稿可以组装，正式封存版本及其快照附件不可增改删',
   await assert.rejects(db.submissionParticipant.create({ data: { ...participant, courseMemberId: f.teacher.id } }));
   await assert.rejects(db.submissionFile.delete({ where: { versionId_fileId: { versionId: version.id, fileId: f.file.id } } }));
   await assert.rejects(db.submissionFile.updateMany({ where: { versionId: version.id }, data: { offeringId: f.offering.id } }));
+  await assert.rejects(db.fileObject.update({ where: { id: f.file.id }, data: { bytes: Buffer.from('silently replaced') } }));
+  await assert.rejects(db.fileObject.update({ where: { id: f.file.id }, data: { originalName: 'different.pdf' } }));
+  await assert.rejects(db.fileObject.delete({ where: { id: f.file.id } }));
   const extra = await db.fileObject.create({ data: { offeringId: f.offering.id, ownerId: f.user.id, storageKey: randomUUID(), originalName: 'extra.txt', mimeType: 'text/plain', sizeBytes: 1n } });
   await assert.rejects(db.submissionFile.create({ data: { ...attachment, fileId: extra.id } }));
   assert.equal((await db.submissionVersion.findUniqueOrThrow({ where: { id: version.id } })).body, '完成稿');
@@ -126,4 +167,105 @@ test('改分者与历史操作者的教学身份不能在事后被改写', async
   const other = await fixture(); const otherDraft = await draft(other);
   await db.submissionVersion.update({ where: { id: otherDraft.version.id }, data: { finalizedAt: new Date() } });
   await assert.rejects(db.review.update({ where: { id: review.id }, data: { offeringId: other.offering.id, versionId: otherDraft.version.id, reviewerId: other.teacher.id } }));
+});
+
+async function reviewStaff(f: Awaited<ReturnType<typeof fixture>>, status: 'ACTIVE' | 'INACTIVE' = 'ACTIVE') {
+  const key = randomUUID();
+  const user = await db.user.create({ data: { email: `review-${key}@test.invalid`, name: '虚构评阅助教' } });
+  return db.courseMember.create({ data: { offeringId: f.offering.id, userId: user.id, role: 'TA', status } });
+}
+
+test('评阅状态只接受封存版本与本期在岗教学署名，完成状态不能匿名', async () => {
+  const f = await fixture(); const { version } = await draft(f);
+  const data = { offeringId: f.offering.id, versionId: version.id, state: 'PENDING' as const, revision: 1 };
+  await assert.rejects(db.submissionVersionReview.create({ data }));
+  assert.equal(await db.submissionVersionReview.count({ where: { versionId: version.id } }), 0);
+  await db.submissionVersion.update({ where: { id: version.id }, data: { finalizedAt: new Date() } });
+  await assert.rejects(db.submissionVersionReview.create({ data: { ...data, state: 'COMPLETED' } }));
+  await assert.rejects(db.submissionVersionReview.create({ data: { ...data, updatedById: f.student.id } }));
+  const inactive = await reviewStaff(f, 'INACTIVE');
+  const active = await reviewStaff(f);
+  const other = await fixture();
+  await assert.rejects(db.submissionVersionReview.create({ data: { ...data, updatedById: inactive.id } }));
+  await assert.rejects(db.submissionVersionReview.create({ data: { ...data, updatedById: other.teacher.id } }));
+  // Initial pending progress has no teacher signature; explicit completion does.
+  await db.submissionVersionReview.create({ data });
+  const where = { versionId: version.id };
+  await assert.rejects(db.submissionVersionReview.update({ where, data: { state: 'COMPLETED' } }));
+  await assert.rejects(db.submissionVersionReview.update({ where, data: { updatedById: f.student.id } }));
+  await assert.rejects(db.submissionVersionReview.update({ where, data: { updatedById: inactive.id } }));
+  await assert.rejects(db.submissionVersionReview.update({ where, data: { updatedById: other.teacher.id } }));
+  const completed = await db.submissionVersionReview.update({ where, data: { state: 'COMPLETED', revision: 2, updatedById: active.id } });
+  assert.equal(completed.state, 'COMPLETED');
+  assert.equal(completed.updatedById, active.id);
+  await assert.rejects(db.submissionVersionReview.update({ where, data: { updatedById: null } }));
+  const reopened = await db.submissionVersionReview.update({ where, data: { state: 'PENDING', revision: 3, updatedById: f.teacher.id } });
+  assert.equal(reopened.updatedById, f.teacher.id);
+});
+
+test('评阅状态永久绑定提交版本与开课，即使目标也是有效封存版本也不能迁移', async () => {
+  const f = await fixture(); const { version } = await draft(f);
+  await db.submissionVersion.update({ where: { id: version.id }, data: { finalizedAt: new Date() } });
+  const another = await db.submissionVersion.create({ data: {
+    offeringId: f.offering.id, submissionId: version.submissionId, submittedById: f.student.id,
+    version: 2, body: '另一封存版本', finalizedAt: new Date(),
+  } });
+  const other = await fixture(); const otherDraft = await draft(other);
+  await db.submissionVersion.update({ where: { id: otherDraft.version.id }, data: { finalizedAt: new Date() } });
+  // No event exists yet, so a rejection cannot merely come from its immutable FK cascade.
+  await db.submissionVersionReview.create({ data: { versionId: version.id, offeringId: f.offering.id } });
+  const where = { versionId: version.id };
+  await assert.rejects(db.submissionVersionReview.update({ where, data: { versionId: another.id } }));
+  await assert.rejects(db.submissionVersionReview.update({ where, data: { versionId: otherDraft.version.id, offeringId: other.offering.id } }));
+  assert.equal((await db.submissionVersionReview.findUniqueOrThrow({ where })).offeringId, f.offering.id);
+  assert.equal(await db.submissionVersionReview.count({ where: { versionId: { in: [another.id, otherDraft.version.id] } } }), 0);
+});
+
+test('评阅审计事件必须匹配当前状态的版本号、状态和署名，写入后不可改删', async () => {
+  const f = await fixture(); const { version } = await draft(f);
+  await db.submissionVersion.update({ where: { id: version.id }, data: { finalizedAt: new Date() } });
+  const data = { versionId: version.id, offeringId: f.offering.id, revision: 2, state: 'COMPLETED' as const, actorId: f.teacher.id };
+  const alternate = await reviewStaff(f);
+  await db.submissionVersionReview.create({ data: {
+    versionId: version.id, offeringId: f.offering.id, revision: 2, state: 'COMPLETED', updatedById: f.teacher.id,
+  } });
+  // Use an empty event history so uniqueness cannot mask the consistency guard.
+  await assert.rejects(db.submissionReviewEvent.create({ data: { ...data, revision: 1 } }));
+  await assert.rejects(db.submissionReviewEvent.create({ data: { ...data, revision: 3 } }));
+  await assert.rejects(db.submissionReviewEvent.create({ data: { ...data, state: 'PENDING' } }));
+  await assert.rejects(db.submissionReviewEvent.create({ data: { ...data, actorId: alternate.id } }));
+  await assert.rejects(db.submissionReviewEvent.create({ data: { ...data, actorId: null } }));
+  assert.equal(await db.submissionReviewEvent.count({ where: { versionId: version.id } }), 0);
+  const event = await db.submissionReviewEvent.create({ data });
+  await assert.rejects(db.submissionReviewEvent.update({ where: { id: event.id }, data: { actorId: alternate.id } }));
+  await assert.rejects(db.submissionReviewEvent.update({ where: { id: event.id }, data: { state: 'PENDING' } }));
+  await assert.rejects(db.submissionReviewEvent.delete({ where: { id: event.id } }));
+  assert.equal((await db.submissionReviewEvent.findUniqueOrThrow({ where: { id: event.id } })).actorId, f.teacher.id);
+});
+
+test('没有评论的评阅操作者也保留角色，当前状态换人后仅历史事件仍保护原署名', async () => {
+  const f = await fixture(); const { version } = await draft(f);
+  const successor = await reviewStaff(f);
+  await db.submissionVersion.update({ where: { id: version.id }, data: { finalizedAt: new Date() } });
+  await db.submissionVersionReview.create({ data: {
+    versionId: version.id, offeringId: f.offering.id, state: 'COMPLETED', revision: 1, updatedById: f.teacher.id,
+  } });
+  assert.equal(await db.review.count({ where: { reviewerId: f.teacher.id } }), 0);
+  assert.equal(await db.submissionReviewEvent.count({ where: { actorId: f.teacher.id } }), 0);
+  // At this point only SubmissionVersionReview refers to this teacher.
+  await assert.rejects(db.courseMember.update({ where: { id: f.teacher.id }, data: { role: 'TA' } }));
+  await db.submissionReviewEvent.create({ data: {
+    versionId: version.id, offeringId: f.offering.id, state: 'COMPLETED', revision: 1, actorId: f.teacher.id,
+  } });
+  await db.submissionVersionReview.update({ where: { versionId: version.id }, data: {
+    state: 'PENDING', revision: 2, updatedById: successor.id,
+  } });
+  await db.submissionReviewEvent.create({ data: {
+    versionId: version.id, offeringId: f.offering.id, state: 'PENDING', revision: 2, actorId: successor.id,
+  } });
+  assert.equal(await db.submissionVersionReview.count({ where: { updatedById: f.teacher.id } }), 0);
+  assert.equal(await db.submissionReviewEvent.count({ where: { actorId: f.teacher.id } }), 1);
+  // The former actor is now referenced only by the immutable event history.
+  await assert.rejects(db.courseMember.update({ where: { id: f.teacher.id }, data: { role: 'TA' } }));
+  assert.equal((await db.courseMember.findUniqueOrThrow({ where: { id: f.teacher.id } })).role, 'TEACHER');
 });

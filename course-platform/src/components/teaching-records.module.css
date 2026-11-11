@@ -1,0 +1,57 @@
+.lessonRecords { max-width: var(--course-prose-width); margin-inline: auto; min-width: 0; }
+.lessonRecordHeader { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
+.lessonRecordHeader > a { display: inline-flex; align-items: center; min-height: 44px; font-size: 14px; }
+.lessonRecordBody { display: grid; gap: 12px; margin-top: 8px; min-width: 0; }
+.noteForm { display: grid; gap: 12px; margin-top: 8px; min-width: 0; }
+.noteForm textarea { min-height: 90px; }
+.noteForm details > div { padding: 4px 0 8px 14px; border-left: 2px solid var(--line); }
+.scope, .actions, .recordContext {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+}
+.scope { margin: 0; }
+.scope div { display: flex; flex-wrap: wrap; gap: 0 6px; }
+.scope dt, .meta, .recordContext {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.scope dd { margin: 0; font-size: 14px; font-weight: 600; }
+.actions { gap: 8px 12px; align-items: center; }
+.actions > :global(.button) { min-height: 44px; }
+.actions > a, .disclosure {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 14px;
+}
+.disclosure {
+  display: list-item;
+  width: fit-content;
+  padding-block: 10px;
+  color: var(--accent);
+}
+.recordList, .history { list-style: none; padding: 0; margin: 0; }
+.record {
+  display: grid;
+  gap: 6px;
+  padding-block: 12px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+  scroll-margin-top: 16px;
+}
+.compactRecordList > .record:first-child { border-top: 0; padding-top: 0; }
+.record:target { background: var(--paper); }
+.record > p { margin-top: 0; }
+.recordHeading { font-size: 16px; text-wrap: initial; }
+.recordBody { white-space: pre-wrap; }
+.history { padding-left: 14px; border-left: 2px solid var(--line); }
+.history li { padding: 8px 0; }
+.history li + li { border-top: 1px solid var(--line); }
+.history p + p { margin-top: 4px; }
+.amendment { margin-block: 4px; }
+.recordDetails > .disclosure { color: var(--muted); padding-block: 4px; }
+.recordDetails[open] { padding-bottom: 6px; }
+.recordDetails[open] > p { margin-block: 6px; }

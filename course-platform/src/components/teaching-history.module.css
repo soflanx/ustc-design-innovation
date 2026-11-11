@@ -1,0 +1,64 @@
+.directory {
+  display: grid;
+  gap: 20px;
+  max-width: var(--course-prose-width);
+  margin-inline: auto;
+}
+.directory h1 { margin-block: 6px; }
+.search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px 12px;
+}
+.search > div { flex: 1 1 210px; min-width: 0; }
+.search input { min-width: 0; }
+.search button { min-height: 44px; }
+.entries, .reviews, .versions { list-style: none; padding: 0; margin: 0; }
+.directoryEntry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  min-height: 48px;
+  gap: 4px 16px;
+  padding-block: 8px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.directoryEntry > a { display: inline-flex; align-items: center; min-height: 44px; font-weight: 600; }
+.reading {
+  display: grid;
+  gap: 22px;
+  min-width: 0;
+  max-width: var(--course-prose-width);
+  margin-inline: auto;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+.readingHeader { display: grid; gap: 8px; min-width: 0; }
+.readingHeader h1 { margin: 0; }
+.titleGroup { color: var(--muted); font-size: .68em; font-weight: 500; }
+.dates { font-size: 13px; }
+.readingHeader > details > summary { min-height: 44px; padding-block: 10px; color: var(--accent); }
+.historySection, .history { display: grid; gap: 12px; min-width: 0; }
+.history { list-style: none; padding: 0; margin: 0; }
+.entry { display: grid; gap: 4px; min-width: 0; }
+.entry + .entry { padding-top: 12px; border-top: 1px solid var(--line); }
+.historySection h2, .work h2 { font-size: 18px; }
+.entry h3 { font-size: 16px; }
+.entry > p + p, .reviews p + p { margin-top: 0; }
+.work { display: grid; gap: 6px; }
+.reviewPreview { line-height: 1.6; }
+.reviewPreview span { margin-inline-end: 4px; color: var(--muted); font-size: 14px; }
+.entry:has(> .resultDetails[open]) > .reviewPreview { display: none; }
+.resultDetails > summary, .pastMessages > summary { width: fit-content; max-width: 100%; padding-block: 5px; color: var(--accent); font-size: 14px; }
+.pastMessages > summary { min-height: 44px; padding-block: 10px; }
+.expanded, .reviews, .versions, .versionNotes { display: grid; gap: 8px; }
+.versionNotes h4 { margin: 0; font-size: 14px; }
+.expanded, .pastMessages > .history { margin-top: 6px; padding-inline-start: 12px; border-inline-start: 2px solid var(--line); }
+.versions { font-size: 14px; color: var(--muted); }
+.body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.meta { color: var(--muted); font-size: 14px; line-height: 1.5; }
+.oldDrafts { display: grid; gap: 8px; }
+.oldDrafts:empty { display: none; }

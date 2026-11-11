@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { getCurrentUser, requireSameOrigin } from './auth';
 import type { FormState } from './form-state';
-import { DomainError, addCourseMember, assignTa, createGroup, createOffering, endTaAssignment, moveStudentToGroup, saveGroupPage, setOfferingStatus } from './management';
+import { DomainError, GroupPageConflictError, addCourseMember, assignTa, createGroup, createOffering, endTaAssignment, getGroupPageRevision, moveStudentToGroup, saveGroupPage, setOfferingStatus, type GroupPageContent, type GroupPageRevisionContent } from './management';
 
 const id = z.string().min(1).max(150);
 const title = z.string().trim().min(1, '请填写名称。').max(100, '名称请控制在 100 字以内。');
@@ -95,10 +95,39 @@ export async function endTaAction(offeringId: string, _state: FormState, form: F
   });
 }
 
-export async function saveGroupPageAction(offeringId: string, groupId: string, _state: FormState, form: FormData): Promise<FormState> {
-  return perform(async userId => {
-    await saveGroupPage(userId, id.parse(offeringId), id.parse(groupId), title.parse(form.get('title')), z.string().trim().min(1, '请填写小组介绍。').max(12000, '内容请控制在 12000 字以内。').parse(form.get('body')));
+export type GroupPageActionState = FormState & { saved?: GroupPageContent; conflict?: GroupPageContent; snapshot?: GroupPageRevisionContent };
+
+async function performGroupPage(expectedViewerId: string, work: (userId: string) => Promise<GroupPageActionState>): Promise<GroupPageActionState> {
+  try {
+    await requireSameOrigin();
+    if (typeof expectedViewerId !== 'string' || !expectedViewerId) return {
+      error: '此页缺少打开时的账号信息。请保留当前编辑，在另一个标签页重新打开小组记录。',
+    };
+    const user = await getCurrentUser();
+    if (!user) return { error: '登录已过期。请在另一个标签页登录原账号，再回此页继续。' };
+    if (user.id !== expectedViewerId) return { error: '当前登录账号与打开小组记录时不同。请在另一个标签页切回原账号，再回此页继续。' };
+    return await work(user.id);
+  } catch (error) {
+    if (error instanceof GroupPageConflictError) return { error: error.message, conflict: error.current };
+    if (error instanceof z.ZodError) return { error: error.issues[0]?.message ?? '请检查填写内容。' };
+    if (error instanceof DomainError) return { error: error.message };
+    console.error('小组记录操作失败', error instanceof Error ? error.name : 'UnknownError');
+    return { error: '操作未完成，当前编辑仍保留，请重试。' };
+  }
+}
+
+export async function saveGroupPageAction(offeringId: string, groupId: string, expectedViewerId: string, form: FormData): Promise<GroupPageActionState> {
+  return performGroupPage(expectedViewerId, async userId => {
+    const expectedRevision = Number(z.string().regex(/^(0|[1-9]\d*)$/, '请重新打开小组记录，缺少有效的记录版本。').parse(form.get('expectedRevision')));
+    const saved = await saveGroupPage(userId, id.parse(offeringId), id.parse(groupId), title.parse(form.get('title')), z.string().trim().min(1, '请填写工作记录。').max(12000, '内容请控制在 12000 字以内。').parse(form.get('body')), expectedRevision);
     refreshOffering(offeringId);
-    return { success: '小组主页已保存，组员和本课程教学团队可查看。' };
+    return { saved, success: `第 ${saved.revision} 版已保存，组员和本课程教学团队可查看。` };
+  });
+}
+
+export async function readGroupPageRevisionAction(offeringId: string, groupId: string, expectedViewerId: string, revision: number): Promise<GroupPageActionState> {
+  return performGroupPage(expectedViewerId, async userId => {
+    const snapshot = await getGroupPageRevision(userId, id.parse(offeringId), id.parse(groupId), z.number().int().positive('请选择有效的历史版本。').parse(revision));
+    return { snapshot };
   });
 }

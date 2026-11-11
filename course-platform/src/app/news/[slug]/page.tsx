@@ -1,30 +1,34 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PageShell } from '@/components/site-shell';
+import { getCurrentUser } from '@/lib/auth';
 import { getPublishedPost } from '@/lib/queries';
 import { getPostImage } from '@/lib/editorial-images';
 import { getProjectDemo } from '@/lib/public-project-demo';
-import { db } from '@/lib/db';
+import { displayDate } from '@/lib/policy';
 import styles from '../article.module.css';
 
 export const dynamic = 'force-dynamic';
 
-export default async function PostPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function PostPage({ params, searchParams }: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ from?: string | string[] }>;
+}) {
   const { slug } = await params;
-  const post = await getPublishedPost(slug);
+  const [post, user, { from }] = await Promise.all([getPublishedPost(slug), getCurrentUser(), searchParams]);
   if (!post) notFound();
   const image = getPostImage(post.slug);
   const demo = post.category === 'PROJECT' ? getProjectDemo(post.slug) : undefined;
-  const offering = post.category === 'PROJECT' && post.offeringId ? await db.courseOffering.findFirst({
-    where: { id: post.offeringId, status: { in: ['ACTIVE', 'ARCHIVED'] } },
-    select: { id: true },
-  }) : null;
+  const { offering } = post;
+  const backToCourse = post.category === 'NEWS' && offering && from === offering.id
+    ? `/courses/${encodeURIComponent(offering.id)}?view=public#course-reports`
+    : null;
   const continueExploring = post.category === 'PROJECT' && <section className={styles.continue} aria-labelledby="continue-exploring-title">
     <h2 id="continue-exploring-title">继续探索</h2>
     <nav aria-label="继续探索"><Link href="/">返回首页 →</Link><Link href={offering ? `/courses/${offering.id}` : '/courses'}>{offering ? '查看所属学期公开信息' : '查看课程公开信息'} →</Link></nav>
   </section>;
   if (demo) {
-    return <PageShell><article className={`container ${styles.project}`} data-project-demo={post.slug}>
+    return <PageShell currentUser={user}><article className={`container ${styles.project}`} data-project-demo={post.slug}>
       <Link className={styles.back} href="/">← 返回首页</Link>
       <header className={styles.header}>
         <p className={styles.eyebrow}>项目示例 · 非真实学生记录</p>
@@ -52,5 +56,16 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
       </div>
     </article></PageShell>;
   }
-  return <PageShell><article className="container section article-page"><Link className="breadcrumb" href="/">← 返回首页</Link><header className="article-header"><p className="muted">{post.category === 'PROJECT' ? '项目专题' : '课堂记录'}{post.offeringLabel ? ` · ${post.offeringLabel}` : ''}</p><h1>{post.title}</h1><p className="article-excerpt">{post.excerpt}</p>{post.publishedAt && <time className="muted" dateTime={post.publishedAt.toISOString()}>{post.publishedAt.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })}</time>}</header>{image && <figure className="article-figure"><img src={image.src} alt={image.alt} width={image.width} height={image.height}/><figcaption>{image.caption}</figcaption></figure>}<div className="article-body">{post.body.split(/\n\s*\n/).map((paragraph, index) => <p key={index}>{paragraph}</p>)}</div>{continueExploring}</article></PageShell>;
+  return <PageShell currentUser={user}><article className="container section article-page">
+    <Link className="breadcrumb" href={backToCourse ?? (post.category === 'PROJECT' ? '/' : { pathname: '/', query: { news: `/news/${post.slug}` }, hash: 'news' })}>← {backToCourse ? '返回开课信息' : post.category === 'PROJECT' ? '返回首页' : '返回新闻'}</Link>
+    <header className="article-header">
+      <p className="muted">{post.category === 'PROJECT' ? '项目专题' : '课程新闻'}{offering && <> · {post.category === 'NEWS' ? <Link href={`/courses/${offering.id}`}>{offering.title}</Link> : offering.title}</>}</p>
+      <h1>{post.title}</h1>
+      <p className="article-excerpt">{post.excerpt}</p>
+      {post.publishedAt && <time className="muted" dateTime={post.publishedAt.toISOString()}>{displayDate(post.publishedAt)}</time>}
+    </header>
+    {image && <figure className="article-figure"><img src={image.src} alt={image.alt} width={image.width} height={image.height}/><figcaption>{image.caption}</figcaption></figure>}
+    <div className="article-body">{post.body.split(/\n\s*\n/).map((paragraph, index) => <p key={index}>{paragraph}</p>)}</div>
+    {continueExploring}
+  </article></PageShell>;
 }

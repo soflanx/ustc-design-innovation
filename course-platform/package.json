@@ -2,7 +2,9 @@
   "name": "design-innovation-platform",
   "version": "0.1.0",
   "private": true,
-  "engines": { "node": ">=22.12.0" },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1 --port 4174",
     "build": "prisma generate && next build",
@@ -17,9 +19,13 @@
     "test:http": "node scripts/check-http.mjs"
   },
   "dependencies": {
+    "@blocknote/core": "0.56.0",
+    "@blocknote/mantine": "0.56.0",
+    "@blocknote/react": "0.56.0",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
     "dotenv": "^17.2.0",
+    "marked": "17.0.6",
     "next": "16.4.2",
     "pg": "^8.16.3",
     "react": "19.3.1",

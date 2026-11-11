@@ -1,8 +1,8 @@
 export const DEMO_USERS = [
   { id: 'demo-teacher', label: '演示教师', description: '发布资料与作业，查看提交并反馈，管理成员与小组。' },
   { id: 'demo-ta', label: '演示助教', description: '跟进负责小组，查看本期提交并添加反馈。' },
-  { id: 'demo-student-a', label: '演示学生 · A 组', description: '阅读课程资料，提交作业，查看 A 组记录与反馈。' },
-  { id: 'demo-student-b', label: '演示学生 · B 组', description: '阅读课程资料，提交作业，查看 B 组记录与反馈。' },
+  { id: 'demo-student-a', label: '演示学生 A', description: '阅读课程资料，提交作业，查看自己的小组记录与反馈。' },
+  { id: 'demo-student-b', label: '演示学生 B', description: '阅读课程资料，提交作业，查看自己的小组记录与反馈。' },
   { id: 'demo-admin', label: '演示管理员', description: '管理课程基础资料与成员。' },
 ] as const;
 

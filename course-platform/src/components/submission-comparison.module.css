@@ -1,0 +1,14 @@
+.comparison { margin-block: 16px; min-width: 0; }
+.comparison > summary { width: fit-content; max-width: 100%; padding-block: 8px; color: var(--accent); font-size: 14px; cursor: pointer; }
+.comparison > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.note, .empty, .byline { color: var(--muted); font-size: 13px; }
+.note { margin-block: 6px 10px; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin: 0; padding-block: 12px; border-top: 1px solid var(--line); }
+.pair dt, .feedbackHeading { font-size: 14px; font-weight: 600; color: var(--ink); }
+.pair dd, .feedbackList p { margin: 4px 0 0; font-size: 15px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.feedbackHeading { margin: 14px 0 6px; }
+.feedbackList { display: grid; gap: 12px; list-style: none; margin: 0; padding: 0; }
+@media (max-width: 600px) {
+  .pair { grid-template-columns: minmax(0, 1fr); }
+  .comparison > summary { min-height: 44px; }
+}

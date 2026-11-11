@@ -1,0 +1,32 @@
+.starter > summary {
+  width: fit-content;
+  min-height: 44px;
+  padding-block: 10px;
+  color: var(--accent);
+  font-weight: 550;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.actions :global(.button) { min-height: 44px; }
+.actions :global(.field-help) { margin: 0; }
+.form {
+  display: grid;
+  gap: 14px;
+  max-width: 100%;
+  margin-top: 16px;
+  padding: 16px 0;
+  border-block: 1px solid var(--line);
+}
+.form > :global(.field-help) { margin: 0; }
+.references > summary {
+  width: fit-content;
+  min-height: 44px;
+  padding-block: 10px;
+  color: var(--accent);
+  font-size: 14px;
+}
+.references > div { margin: 4px 0 6px; padding-left: 12px; border-left: 1px solid var(--line); }

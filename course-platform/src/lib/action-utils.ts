@@ -5,11 +5,17 @@ import { getCurrentUser, requireSameOrigin } from './auth';
 import { DomainError } from './management';
 import type { FormState } from './form-state';
 
-export async function runCourseAction(work: (userId: string) => Promise<FormState>): Promise<FormState> {
+export function requireEditorAuthor(userId: string, expectedUserId: string | undefined) {
+  if (expectedUserId !== undefined && userId !== expectedUserId) {
+    throw new DomainError('登录账号已切换，请切回打开编辑器时的账号。你的内容尚未写入。');
+  }
+}
+
+export async function runCourseAction(work: (userId: string) => Promise<FormState>, signedOut: string | FormState = '登录已过期，请重新进入课程。'): Promise<FormState> {
   try {
     await requireSameOrigin();
     const user = await getCurrentUser();
-    if (!user) return { error: '登录已过期，请重新进入课程。' };
+    if (!user) return typeof signedOut === 'string' ? { error: signedOut } : signedOut;
     return await work(user.id);
   } catch (error) {
     if (error instanceof z.ZodError) return { error: error.issues[0]?.message ?? '请检查填写内容。' };

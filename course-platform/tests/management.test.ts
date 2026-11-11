@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { db } from '../src/lib/db';
 import { canManageOffering, canViewGroup, canViewOffering } from '../src/lib/policy';
-import { DomainError, createOffering, setOfferingStatus, addCourseMember, createGroup, moveStudentToGroup, assignTa, endTaAssignment, saveGroupPage } from '../src/lib/management';
+import { DomainError, OfferingIntroductionConflictError, createOffering, setOfferingStatus, saveOfferingIntroduction, addCourseMember, createGroup, moveStudentToGroup, assignTa, endTaAssignment, saveGroupPage } from '../src/lib/management';
 
+assert.match(new URL(process.env.DATABASE_URL ?? 'postgresql://invalid/').pathname, /^\/design_test_[a-f\d]+$/);
 after(async () => { await db.$disconnect(); });
 
 async function fixture() {
@@ -22,6 +23,68 @@ async function fixture() {
 }
 
 const denied = (promise: Promise<unknown>) => assert.rejects(promise, DomainError);
+
+test('只更新本学期公开介绍，保持通用介绍、往期归档和成员教学安排各自独立', async () => {
+  const f = await fixture();
+  await db.course.update({ where: { id: f.course.id }, data: { description: '长期课程介绍' } });
+  const prior = await createOffering(f.teacher.id, {
+    courseId: f.course.id, termName: '往期', startDate: new Date('2029-09-01'), endDate: new Date('2030-01-01'), description: '往期访客介绍',
+  });
+  await setOfferingStatus(f.teacher.id, prior.id, 'ARCHIVED');
+  const focus = await db.courseFocus.create({ data: {
+    offeringId: f.offering.id, title: '本课成员教学安排', publishedAt: new Date(),
+    draftTitle: '教学团队草稿', draftDocument: { version: 1, blocks: [] },
+  } });
+  const first = await saveOfferingIntroduction(f.teacher.id, f.offering.id, '测试', '  学习观察\n\n  再做原型。  ');
+  assert.deepEqual(first, { description: '学习观察\n\n  再做原型。', status: 'DRAFT' });
+  await setOfferingStatus(f.teacher.id, f.offering.id, 'ACTIVE');
+  const admin = await db.user.create({ data: { email: `${randomUUID()}@test.invalid`, name: '管理员', isAdmin: true } });
+  const cleared = await saveOfferingIntroduction(admin.id, f.offering.id, first.description, ' \n ');
+  assert.deepEqual(cleared, { description: '', status: 'ACTIVE' });
+  assert.equal((await db.courseOffering.findUniqueOrThrow({ where: { id: f.offering.id } })).description, '');
+  assert.equal((await db.course.findUniqueOrThrow({ where: { id: f.course.id } })).description, '长期课程介绍');
+  assert.deepEqual(await db.courseOffering.findUniqueOrThrow({ where: { id: prior.id }, select: { description: true, status: true } }), {
+    description: '往期访客介绍', status: 'ARCHIVED',
+  });
+  assert.deepEqual(await db.courseFocus.findUniqueOrThrow({ where: { offeringId: f.offering.id } }), focus);
+});
+
+test('两份旧表竞争保存只有一份成功；冲突带回最新值，重试同结果和清空均幂等', async () => {
+  const f = await fixture();
+  const save = (expected: string, next: string) => saveOfferingIntroduction(f.teacher.id, f.offering.id, expected, next);
+  const results = await Promise.allSettled([save('测试', '甲介绍'), save('测试', '乙介绍')]);
+  const success = results.find(result => result.status === 'fulfilled');
+  const failure = results.find(result => result.status === 'rejected');
+  assert.ok(success && failure);
+  const latest = success.value.description;
+  assert.ok(failure.reason instanceof OfferingIntroductionConflictError);
+  assert.equal(failure.reason.currentDescription, latest);
+  assert.equal((await save('测试', latest)).description, latest);
+  assert.equal((await save(latest, '')).description, '');
+  await assert.rejects(save(latest, '另一份编辑'), error => error instanceof OfferingIntroductionConflictError && error.currentDescription === '');
+  assert.equal((await save(latest, '')).description, '');
+});
+
+test('拒绝越权和归档旧表，不回显冲突内容；允许较长的旧基准修订到 2000 字以内', async () => {
+  const f = await fixture(), other = await fixture();
+  for (const user of [f.student, f.ta, other.teacher]) {
+    await assert.rejects(saveOfferingIntroduction(user.id, f.offering.id, '过时基准', '改动'), error =>
+      error instanceof DomainError && !(error instanceof OfferingIntroductionConflictError));
+  }
+  const legacy = '旧'.repeat(2010);
+  await db.courseOffering.update({ where: { id: f.offering.id }, data: { description: legacy } });
+  await denied(saveOfferingIntroduction(f.teacher.id, f.offering.id, legacy, '新'.repeat(2001)));
+  await denied(saveOfferingIntroduction(f.teacher.id, f.offering.id, legacy, null as unknown as string));
+  await denied(saveOfferingIntroduction(f.teacher.id, f.offering.id, legacy, '无效\0正文'));
+  const shortened = '新'.repeat(2000);
+  assert.equal((await saveOfferingIntroduction(f.teacher.id, f.offering.id, legacy, shortened)).description, shortened);
+  await setOfferingStatus(f.teacher.id, f.offering.id, 'ARCHIVED');
+  await assert.rejects(saveOfferingIntroduction(f.teacher.id, f.offering.id, legacy, '归档旧编辑'), /已归档/);
+  await setOfferingStatus(f.teacher.id, f.offering.id, 'ACTIVE');
+  await db.courseMember.update({ where: { offeringId_userId: { offeringId: f.offering.id, userId: f.teacher.id } }, data: { status: 'INACTIVE' } });
+  await assert.rejects(saveOfferingIntroduction(f.teacher.id, f.offering.id, legacy, '名单已停用'), /没有管理/);
+  assert.equal((await db.courseOffering.findUniqueOrThrow({ where: { id: f.offering.id } })).description, shortened);
+});
 
 test('权限边界：学生仅看本组，助教可查看但不能管理，失效成员不再可见', () => {
   const student = { role: 'STUDENT', status: 'ACTIVE' } as const;
@@ -85,7 +148,7 @@ test('跨学期伪造小组或成员ID在服务与数据库两层均拒绝', asy
   await denied(moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, other.studentMember.id));
   await denied(assignTa(f.teacher.id, f.offering.id, other.a.id, f.taMember.id));
   await denied(assignTa(f.teacher.id, f.offering.id, f.a.id, other.taMember.id));
-  await denied(saveGroupPage(f.teacher.id, f.offering.id, other.a.id, '越课', ''));
+  await denied(saveGroupPage(f.teacher.id, f.offering.id, other.a.id, '越课', '', 0));
   await assert.rejects(db.groupMember.create({ data: { offeringId: f.offering.id, groupId: other.a.id, courseMemberId: f.studentMember.id } }));
   await assert.rejects(db.groupMember.create({ data: { offeringId: f.offering.id, groupId: f.a.id, courseMemberId: other.studentMember.id } }));
   assert.equal(await db.groupMember.count({ where: { offeringId: f.offering.id } }), 0);
@@ -94,12 +157,12 @@ test('跨学期伪造小组或成员ID在服务与数据库两层均拒绝', asy
 test('学生可编辑本组主页，不能编辑其他组；助教查看权不赋予编辑权', async () => {
   const f = await fixture();
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.studentMember.id);
-  const page = await saveGroupPage(f.student.id, f.offering.id, f.a.id, '本组进展', '观察与发现');
+  const page = await saveGroupPage(f.student.id, f.offering.id, f.a.id, '本组进展', '观察与发现', 0);
   assert.equal(page.body, '观察与发现');
-  await denied(saveGroupPage(f.student.id, f.offering.id, f.b.id, '冒名', ''));
-  await denied(saveGroupPage(f.ta.id, f.offering.id, f.a.id, '助教冒名', ''));
+  await denied(saveGroupPage(f.student.id, f.offering.id, f.b.id, '冒名', '', 0));
+  await denied(saveGroupPage(f.ta.id, f.offering.id, f.a.id, '助教冒名', '', page.revision));
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.studentMember.id);
-  await denied(saveGroupPage(f.student.id, f.offering.id, f.a.id, '离组后编辑', ''));
+  await denied(saveGroupPage(f.student.id, f.offering.id, f.a.id, '离组后编辑', '', page.revision));
   assert.equal((await db.groupPage.findUniqueOrThrow({ where: { groupId: f.a.id } })).title, '本组进展');
 });
 
@@ -107,14 +170,14 @@ test('归档阻止成员、小组、助教和主页变更，保留已有内容',
   const f = await fixture();
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.studentMember.id);
   const assignment = await assignTa(f.teacher.id, f.offering.id, f.a.id, f.taMember.id);
-  await saveGroupPage(f.student.id, f.offering.id, f.a.id, '归档前', '留存');
+  const page = await saveGroupPage(f.student.id, f.offering.id, f.a.id, '归档前', '留存', 0);
   await setOfferingStatus(f.teacher.id, f.offering.id, 'ARCHIVED');
   await denied(addCourseMember(f.teacher.id, f.offering.id, f.outsider.id, 'STUDENT'));
   await denied(createGroup(f.teacher.id, f.offering.id, '新组', ''));
   await denied(moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.studentMember.id));
   await denied(assignTa(f.teacher.id, f.offering.id, f.b.id, f.taMember.id));
   await denied(endTaAssignment(f.teacher.id, f.offering.id, assignment.id));
-  await denied(saveGroupPage(f.student.id, f.offering.id, f.a.id, '覆盖归档', ''));
+  await denied(saveGroupPage(f.student.id, f.offering.id, f.a.id, '覆盖归档', '', page.revision));
   assert.equal((await db.groupPage.findUniqueOrThrow({ where: { groupId: f.a.id } })).body, '留存');
   assert.equal((await db.taGroupAssignment.findUniqueOrThrow({ where: { id: assignment.id } })).endedAt, null);
 });

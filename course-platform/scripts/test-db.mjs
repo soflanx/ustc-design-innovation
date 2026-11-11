@@ -36,7 +36,10 @@ try {
   created = true;
   run(path.join(root, 'node_modules/prisma/build/index.js'), ['migrate', 'deploy']);
   const files = readdirSync(path.join(root, 'tests')).filter(file => file.endsWith('.test.ts')).map(file => path.join(root, 'tests', file));
-  run('--import', ['tsx', '--test', ...files]);
+  // Files share this isolated database. Run fixtures serially so unrelated
+  // Serializable transactions do not conflict; explicit concurrency tests
+  // inside each file still exercise simultaneous application writes.
+  run('--import', ['tsx', '--test', '--test-concurrency=1', ...files]);
 } catch (error) {
   console.error(error instanceof Error ? error.message : '集成测试失败');
   process.exitCode = 1;

@@ -1,13 +1,42 @@
 'use client';
 
-import { Children, useEffect, useRef, useState, type ReactNode, type KeyboardEvent } from 'react';
+import { Children, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent } from 'react';
+import Link from 'next/link';
 import styles from '@/app/portal-home.module.css';
 
-export function NewsCarousel({ children }: { children: ReactNode }) {
+export function NewsCardLink({ href, children }: { href: string; children: ReactNode }) {
+  function rememberCard() {
+    // Keep Next's routing state intact and annotate only the entry we are leaving.
+    try {
+      const courseNewsCard = { article: href, page: window.location.href };
+      window.history.replaceState({ ...window.history.state, courseNewsCard }, '');
+    } catch { /* Navigation still works if the browser refuses the history update. */ }
+  }
+  return <Link className={styles.newsCardLink} href={href} data-news-card={href} onNavigate={rememberCard}>{children}</Link>;
+}
+
+export function NewsCarousel({ children, returnIndex }: { children: ReactNode; returnIndex?: number }) {
   const rail = useRef<HTMLUListElement>(null);
   const [edges, setEdges] = useState({ start: true, end: false });
-  const [active, setActive] = useState(1);
+  const [active, setActive] = useState(Math.max(0, returnIndex ?? 0) + 1);
   const count = Children.count(children);
+
+  useLayoutEffect(() => {
+    const element = rail.current;
+    if (!element) return;
+    const savedCard = window.history.state?.courseNewsCard;
+    let index = returnIndex;
+    if (savedCard?.page === window.location.href && typeof savedCard.article === 'string') {
+      index = Array.from(element.children).findIndex(slide => slide.querySelector('[data-news-card]')?.getAttribute('data-news-card') === savedCard.article);
+    }
+    if (index === undefined) return;
+    const first = element.firstElementChild;
+    const target = element.children.item(Math.max(0, index));
+    if (first && target) {
+      const left = target.getBoundingClientRect().left - first.getBoundingClientRect().left;
+      element.scrollTo({ left, behavior: 'instant' });
+    }
+  }, [returnIndex]);
 
   useEffect(() => {
     const element = rail.current;
@@ -43,16 +72,15 @@ export function NewsCarousel({ children }: { children: ReactNode }) {
 
   return <>
     <div className={styles.newsHeading}>
-      <p className={styles.sectionKicker}>最新动态</p>
-      <h2 id="news-title">交流与现场</h2>
+      <h2 id="news-title">新闻</h2>
     </div>
-    <ul id="news-rail" className={styles.newsRail} ref={rail} tabIndex={0} aria-label="交流、汇报与课堂动态，可左右滚动" onKeyDown={handleKey}>
+    <ul id="news-rail" className={styles.newsRail} ref={rail} tabIndex={0} aria-label="课程新闻，可左右滚动" onKeyDown={handleKey}>
       {Children.map(children, (child, index) => <li className={styles.newsSlide} data-active={index + 1 === active}>{child}</li>)}
     </ul>
-    <div className={styles.carouselControls} aria-label="动态翻页">
-      <span className={styles.carouselCount} aria-live="polite" aria-atomic="true"><span className="sr-only">第 </span>{String(active).padStart(2, '0')}<span className="sr-only"> 条，共 </span><span aria-hidden="true"> / </span><span>{String(count).padStart(2, '0')}</span><span className="sr-only"> 条动态</span></span>
-      <button type="button" aria-label="上一条动态" aria-controls="news-rail" disabled={edges.start} onClick={() => move(-1)}><span aria-hidden="true">←</span></button>
-      <button type="button" aria-label="下一条动态" aria-controls="news-rail" disabled={edges.end} onClick={() => move(1)}><span aria-hidden="true">→</span></button>
+    <div className={styles.carouselControls} aria-label="新闻翻页">
+      <span className={styles.carouselCount} aria-live="polite" aria-atomic="true"><span className="sr-only">第 </span>{String(active).padStart(2, '0')}<span className="sr-only"> 条，共 </span><span aria-hidden="true"> / </span><span>{String(count).padStart(2, '0')}</span><span className="sr-only"> 条新闻</span></span>
+      <button type="button" aria-label="上一条新闻" aria-controls="news-rail" disabled={edges.start} onClick={() => move(-1)}><span aria-hidden="true">←</span></button>
+      <button type="button" aria-label="下一条新闻" aria-controls="news-rail" disabled={edges.end} onClick={() => move(1)}><span aria-hidden="true">→</span></button>
     </div>
   </>;
 }

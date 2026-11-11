@@ -1,24 +1,105 @@
-.editor { max-width: 800px; margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
-.editor > details > summary { width: fit-content; max-width: 100%; padding-block: 7px; color: var(--accent); font-size: 14px; cursor: pointer; }
-.content { padding-top: 22px; }
-.form, .fields { display: grid; gap: 24px; }
-.fields { min-width: 0; margin: 0; padding: 0; border: 0; }
-.fields textarea { min-height: 210px; font-size: 16px; line-height: 1.85; }
-.fields input[type=text] { font-size: 16px; }
-.related { display: grid; gap: 22px; }
-.help, .empty { color: var(--muted); font-size: 13px; line-height: 1.7; }
-.options { min-width: 0; margin: 0; padding: 0; border: 0; }
-.options legend { margin-bottom: 12px; padding: 0; color: var(--ink); font-size: 15px; font-weight: 600; }
-.choices { display: grid; gap: 8px; }
-.choice { display: flex; align-items: flex-start; gap: 10px; min-height: 36px; padding-block: 5px; color: var(--ink); font-size: 14px; line-height: 1.7; cursor: pointer; }
-.choice input { flex-shrink: 0; width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--accent); }
-.choice > span { min-width: 0; }
-.choice small { display: inline-block; margin-left: 12px; color: var(--muted); font-size: 13px; }
+.editor { min-width: 0; margin-bottom: 30px; }
+.entry, .toolbar, .panel > :is(.saved, .error, .discard, .publicationReview) {
+  max-width: var(--course-prose-width, 736px);
+  margin-inline: auto;
+}
+.entry { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; }
+.entryActions { display: flex; align-items: center; gap: 6px; margin-inline-start: auto; }
+.entry > :is(.error, .saved) { flex-basis: 100%; }
+.editButton, .quietButton, .saveButton, .options summary {
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+.editButton, .quietButton { padding: 7px 11px; background: transparent; color: var(--muted); }
+.editButton { background: var(--surface-muted); color: var(--ink); }
+.editButton:hover, .quietButton:hover, .quietButton[aria-pressed=true],
+.options summary:hover, .options[open] summary { background: #eef2f3; color: var(--ink); }
+.saveButton { padding: 7px 15px; color: #fff; background: var(--accent); }
+.saveButton:hover { background: #24546e; }
+.saved, .help { color: var(--muted); font-size: 13px; line-height: 1.7; }
+.panel > .saved { margin-block: 16px 0; }
+.panel { min-width: 0; scroll-margin-top: 16px; }
+.toolbar { position: sticky; top: 0; z-index: 12; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 16px; padding-block: 8px 12px; border-bottom: 1px solid var(--line); background: #fff; }
+.toolbarLeft, .actions { display: flex; align-items: center; min-width: 0; }
+.toolbarLeft { gap: 12px; }
+.toolbarInsert { display: flex; align-items: center; }
+.toolbarInsert[hidden], .toolbarInsert:empty { display: none; }
+.actions { gap: 4px; }
+.toolbar > .actions { margin-inline-start: auto; }
+.state { display: inline-flex; align-items: center; gap: 9px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #8b9998; }
+.state[data-dirty=true]::before { background: #b37532; }
+.options { position: relative; }
+.options summary { display: grid; place-items: center; width: 36px; color: var(--muted); list-style: none; }
+.options summary::-webkit-details-marker { display: none; }
+.optionList { position: absolute; z-index: 4; inset: calc(100% + 6px) 0 auto auto; display: grid; gap: 2px; min-width: 146px; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 4px 16px #142b3512; }
+.optionList button { width: 100%; min-height: 38px; padding: 6px 12px; border: 0; border-radius: 4px; background: transparent; color: var(--ink); text-align: left; font-size: 14px; white-space: nowrap; }
+.optionList button:hover, .optionList button:focus-visible { background: var(--surface-muted); }
+
+.canvas { --course-block-gutter: 64px; max-width: 888px; min-width: 0; margin-inline: auto; padding: 28px 44px 56px var(--course-block-gutter); }
+.canvas[hidden] { display: none; }
+.previewNote { margin: 0 0 20px; font-size: 12px; color: var(--muted); }
+.preview :global([data-course-document]) { margin-top: 0; }
+.error { padding: 12px 16px; margin-top: 16px; border-radius: 4px; background: #fff3ef; color: #9d3f30; font-size: 14px; }
+.discard { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 14px 16px; margin-top: 16px; border: 1px solid #e0c5b8; background: #fff9f3; border-radius: 5px; }
+.discard p { font-size: 14px; }
+.publicationReview { display: grid; gap: 12px; margin-top: 16px; padding: 18px 20px; border: 1px solid #ded2b7; border-radius: 5px; background: #fcf9f1; color: #4e554d; font-size: 13px; line-height: 1.75; overflow-wrap: anywhere; }
+.publicationReview h3 { margin: 0; font-size: 15px; line-height: 1.6; font-weight: 600; scroll-margin-top: 105px; }
+.publicationReview h3:focus { outline: 2px solid #8a9d91; outline-offset: 4px; border-radius: 2px; }
+.publicationReview p { margin: 0; }
+.publicationItems { display: grid; gap: 10px; padding: 0; margin: 0; list-style: none; }
+.publicationItems li { display: grid; gap: 2px; }
+.publicationItems label { display: flex; align-items: baseline; gap: 8px; }
+.publicationItems strong { font-weight: 600; }
+.publicationItems p { color: #697064; }
+.publicationReview .actions { justify-content: flex-end; flex-wrap: wrap; margin-top: 2px; }
+.publicationReview .saveButton { white-space: normal; }
+.canvas:has(.writingCanvas), .canvas.preview {
+  max-width: var(--course-prose-width, 736px);
+  padding: 40px 0 64px;
+}
+.titleField { display: grid; margin: 0 0 28px; min-width: 0; }
+.titleInput, .titleField::after {
+  grid-area: 1 / 1;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  margin: 0;
+  color: var(--ink);
+  font: 600 clamp(30px, 3vw, 40px)/1.35 var(--sans);
+  letter-spacing: -.025em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.titleField::after { content: attr(data-title); visibility: hidden; }
+.titleInput { display: block; min-height: 0; background: transparent; resize: none; overflow: hidden; border-radius: 0; }
+.titleInput:focus-visible { outline: 0; box-shadow: inset 0 -1px var(--accent); }
+.titleInput::placeholder { color: #778184; }
+@media (max-width: 1000px) {
+  .canvas { padding-inline: var(--course-block-gutter) 8px; }
+}
 @media (max-width: 740px) {
-  .editor { margin-top: 22px; }
-  .editor > details > summary { min-height: 44px; padding-block: 10px; }
-  .content { padding-top: 18px; }
-  .choice { min-height: 44px; padding-block: 8px; }
-  .choice small { margin-left: 8px; }
-  .form :global(.button) { min-height: 44px; }
+  .toolbar { gap: 0 8px; padding-block: 4px; }
+  .state { font-size: 12px; gap: 6px; }
+  .quietButton, .saveButton, .editButton, .options summary, .optionList button { min-height: 44px; }
+  .quietButton, .saveButton { padding-inline: 10px; }
+  .options summary { width: 44px; }
+  .canvas { --course-block-gutter: 56px; padding: 20px 4px 40px var(--course-block-gutter); }
+  .canvas:has(.writingCanvas), .canvas.preview { padding: 28px 0 48px; }
+  .titleField { margin-bottom: 24px; }
+  .publicationReview { padding: 14px; }
+}
+@media (max-width: 510px) {
+  .toolbarLeft { gap: 4px; }
+  .toolbar .actions { gap: 0; }
+  .toolbar .quietButton, .toolbar .saveButton { min-width: 44px; padding-inline: 8px; }
+  .qualifier { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+}
+@media (max-height: 520px) {
+  .toolbar { position: static; }
 }

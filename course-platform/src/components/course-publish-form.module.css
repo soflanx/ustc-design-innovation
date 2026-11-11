@@ -1,0 +1,26 @@
+.page { max-width: 960px; padding-block: 36px 80px; }
+.heading { margin-block: 32px 36px; }
+.heading h1 { font-size: 32px; font-weight: 600; letter-spacing: -.025em; line-height: 1.4; }
+.heading p { margin-top: 10px; color: var(--muted); font-size: 15px; line-height: 1.8; }
+.form { display: grid; gap: 30px; }
+.termRow { display: flex; align-items: flex-end; gap: 28px; padding-bottom: 26px; border-bottom: 1px solid var(--line); }
+.termField { display: grid; gap: 9px; min-width: 240px; }
+.termField label { font-size: 13px; color: var(--muted); }
+.termField select { width: 100%; }
+.calendar { display: grid; gap: 5px; padding-bottom: 2px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.calendar a { color: var(--muted); text-underline-offset: 3px; }
+.courses { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.course { display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 34px; padding: 28px; min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.course h2 { font-size: 23px; line-height: 1.5; font-weight: 600; }
+.course p { margin-top: 8px; color: var(--muted); font-size: 14px; line-height: 1.7; }
+.course .permission { margin: 0; font-size: 13px; }
+.note { color: var(--muted); font-size: 13px; line-height: 1.8; }
+@media(max-width: 640px) {
+  .page { padding-block: 26px 56px; }
+  .heading { margin-block: 26px 28px; }
+  .heading h1 { font-size: 28px; }
+  .termRow { align-items: stretch; flex-direction: column; gap: 14px; }
+  .termField { min-width: 0; }
+  .courses { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .course { padding: 24px; gap: 24px; }
+}

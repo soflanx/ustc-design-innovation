@@ -3,9 +3,15 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { db } from '../src/lib/db';
 import { DomainError, moveStudentToGroup } from '../src/lib/management';
+import { assignmentMaterialLink } from '../src/lib/assignment-material-links';
+import { changeResourceStatus, createResource } from '../src/lib/resource-service';
+import type { SubmissionInput } from '../src/lib/submission-contract';
+import { createCourseSubpage } from '../src/lib/course-subpages';
+import { getTeachingResultSource, parseTeachingResultSource } from '../src/lib/teaching-result-source';
+import { confirmedSubmissionInput } from './submission-fixture';
 import {
   type AssignmentInput, createAssignment, updateAssignment, submitAssignment, addFeedback,
-  getAssignmentIndex, getAssignmentDetail, getSubmissionVersion,
+  getAssignmentIndex, getAssignmentDetail, getSubmissionVersion, getSubmissionAttachment, setSubmissionCorrectionWindow, SubmissionConflictError, ReviewRevisionConflictError, setSubmissionReviewState,
 } from '../src/lib/teaching';
 
 // The runner creates this database and destroys it afterwards. Never write
@@ -17,7 +23,10 @@ const denied = (promise: Promise<unknown>) => assert.rejects(promise, DomainErro
 const input = (extra: Partial<AssignmentInput> = {}): AssignmentInput => ({
   title: '观察记录', description: '提交本周观察与发现。', mode: 'INDIVIDUAL', status: 'PUBLISHED', dueAt: null, ...extra,
 });
-const submissionInput = (body = '本周的观察记录', expectedGroupId: string | null = null) => ({ body, requestId: randomUUID(), expectedGroupId });
+// Deliberately unconfirmed input is only used by rejection fixtures.
+const submissionInput = (body = '本周的观察记录', expectedGroupId: string | null = null): SubmissionInput => ({
+  body, requestId: randomUUID(), expectedGroupId, expectedAssignmentRevision: 1, expectedLatestSubmissionToken: '0'.repeat(64),
+});
 
 async function fixture() {
   const key = randomUUID();
@@ -46,13 +55,13 @@ test('作业管理仅允许教师和管理员，并在服务层验证文本、�
   ]) await denied(createAssignment(f.teacher.id, f.offering.id, input(invalid as Partial<AssignmentInput>)));
   assert.equal(await db.assignment.count({ where: { offeringId: f.offering.id } }), 0);
   const assignment = await createAssignment(f.admin.id, f.offering.id, input({ status: 'DRAFT' }));
-  await denied(updateAssignment(f.student.id, f.offering.id, assignment.id, input()));
-  await denied(updateAssignment(f.ta.id, f.offering.id, assignment.id, input()));
-  await denied(updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ status: 'ARCHIVED' })));
-  await updateAssignment(f.teacher.id, f.offering.id, assignment.id, input());
-  await denied(updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ status: 'DRAFT' })));
-  await updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ status: 'ARCHIVED' }));
-  await denied(updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ status: 'DRAFT' })));
+  await denied(updateAssignment(f.student.id, f.offering.id, assignment.id, input(), assignment.revision));
+  await denied(updateAssignment(f.ta.id, f.offering.id, assignment.id, input(), assignment.revision));
+  await denied(updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ status: 'ARCHIVED' }), assignment.revision));
+  const published = await updateAssignment(f.teacher.id, f.offering.id, assignment.id, input(), assignment.revision);
+  await denied(updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ status: 'DRAFT' }), published.revision));
+  const ended = await updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ status: 'ARCHIVED' }), published.revision);
+  await denied(updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ status: 'DRAFT' }), ended.revision));
   assert.equal((await getAssignmentIndex(f.student.id, f.offering.id)).assignments[0].status, 'ARCHIVED');
 });
 
@@ -68,7 +77,7 @@ test('学生看不到草稿；筹备课程、未发布或已结束作业不收�
   assert.equal((await getAssignmentDetail(f.student.id, f.offering.id, assignment.id)).canSubmit, false);
   await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput()));
   await db.courseOffering.update({ where: { id: f.offering.id }, data: { status: 'ACTIVE' } });
-  await updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ status: 'ARCHIVED' }));
+  await updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ status: 'ARCHIVED' }), assignment.revision);
   await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput()));
   assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id } }), 0);
   assert.equal(await db.submission.count({ where: { offeringId: f.offering.id } }), 0);
@@ -77,7 +86,7 @@ test('学生看不到草稿；筹备课程、未发布或已结束作业不收�
 test('个人提交一次事务生成完整快照并封存；版本递增，重复请求不重建或覆盖', async () => {
   const f = await fixture();
   const assignment = await createAssignment(f.teacher.id, f.offering.id, input());
-  const request = submissionInput(' 第一版 ');
+  const request = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, ' 第一版 ');
   const first = await submitAssignment(f.student.id, f.offering.id, assignment.id, request);
   assert.ok(first.finalizedAt);
   assert.equal(first.body, '第一版');
@@ -86,7 +95,7 @@ test('个人提交一次事务生成完整快照并封存；版本递增，重�
   assert.equal((await submitAssignment(f.student.id, f.offering.id, assignment.id, request)).id, first.id);
   await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, { ...request, body: '试图覆盖' }));
   await denied(submitAssignment(f.peer.id, f.offering.id, assignment.id, request));
-  const second = await submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput('第二版'));
+  const second = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '第二版'));
   assert.equal(second.version, 2);
   const detail = await getSubmissionVersion(f.student.id, f.offering.id, first.id);
   assert.deepEqual(detail.version.participants, [{ id: f.studentMember.id, name: 'student' }]);
@@ -94,7 +103,7 @@ test('个人提交一次事务生成完整快照并封存；版本递增，重�
   assert.equal(detail.version.submittedBy.id, f.studentMember.id);
   await assert.rejects(db.submissionVersion.update({ where: { id: first.id }, data: { body: '篡改' } }));
   await assert.rejects(db.submissionParticipant.deleteMany({ where: { versionId: first.id } }));
-  await denied(updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ mode: 'GROUP' })));
+  await denied(updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ mode: 'GROUP' }), assignment.revision));
   const peerDetail = await getAssignmentDetail(f.peer.id, f.offering.id, assignment.id);
   assert.equal(peerDetail.versions.length, 0);
   await denied(getSubmissionVersion(f.peer.id, f.offering.id, first.id));
@@ -104,51 +113,55 @@ test('个人提交一次事务生成完整快照并封存；版本递增，重�
   assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id, finalizedAt: null } }), 0);
 });
 
-test('并发首交和后续提交保留一个归属容器、连续版本号；并发重复请求只生成一版', async () => {
+test('同一确认版本的并发提交只接受一份，重新确认后可继续提交；重复请求只生成一版', async () => {
   const f = await fixture();
   const assignment = await createAssignment(f.teacher.id, f.offering.id, input({ mode: 'GROUP' }));
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.studentMember.id);
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.peerMember.id);
-  const results = await Promise.all([
-    submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput('学生提交', f.a.id)),
-    submitAssignment(f.peer.id, f.offering.id, assignment.id, submissionInput('组员提交', f.a.id)),
-    submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput('后续提交', f.a.id)),
+  const firstRequest = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '学生提交');
+  const peerRequest = await confirmedSubmissionInput(f.peer.id, f.offering.id, assignment.id, '组员提交');
+  const results = await Promise.allSettled([
+    submitAssignment(f.student.id, f.offering.id, assignment.id, firstRequest),
+    submitAssignment(f.peer.id, f.offering.id, assignment.id, peerRequest),
   ]);
-  assert.deepEqual(results.map(row => row.version).sort(), [1, 2, 3]);
-  assert.equal(new Set(results.map(row => row.submissionId)).size, 1);
-  const request = submissionInput('双击提交', f.a.id);
+  assert.equal(results.filter(row => row.status === 'fulfilled').length, 1);
+  const conflict = results.find(row => row.status === 'rejected');
+  assert.ok(conflict?.status === 'rejected' && conflict.reason instanceof DomainError);
+  assert.match(conflict.reason.message, /已有新提交/);
+  const request = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '双击提交');
   const duplicate = await Promise.all([
     submitAssignment(f.student.id, f.offering.id, assignment.id, request),
     submitAssignment(f.student.id, f.offering.id, assignment.id, request),
   ]);
   assert.equal(duplicate[0].id, duplicate[1].id);
-  assert.equal(duplicate[0].version, 4);
+  assert.equal(duplicate[0].version, 2);
   assert.equal(await db.submission.count({ where: { assignmentId: assignment.id } }), 1);
-  assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id } }), 4);
-  assert.equal(await db.submissionParticipant.count({ where: { offeringId: f.offering.id } }), 8);
+  assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id } }), 2);
+  assert.equal(await db.submissionParticipant.count({ where: { offeringId: f.offering.id } }), 4);
 });
 
-test('调组后旧版依快照可读，新组员不能看加入前版本，离组者不能看后续版本或反馈', async () => {
+test('调组后旧版依快照可读，新组员可看本组既有成果，离组者不能看后续版本或反馈', async () => {
   const f = await fixture();
   const assignment = await createAssignment(f.teacher.id, f.offering.id, input({ mode: 'GROUP' }));
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.studentMember.id);
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.peerMember.id);
-  const oldRequest = submissionInput('调组前', f.a.id);
+  const oldRequest = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '调组前', f.a.id);
   const old = await submitAssignment(f.student.id, f.offering.id, assignment.id, oldRequest);
   await addFeedback(f.ta.id, f.offering.id, old.id, '旧组反馈');
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.peerMember.id);
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.newcomerMember.id);
-  const latest = await submitAssignment(f.newcomer.id, f.offering.id, assignment.id, submissionInput('调组后', f.a.id));
+  const latest = await submitAssignment(f.newcomer.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.newcomer.id, f.offering.id, assignment.id, '调组后', f.a.id));
   await addFeedback(f.teacher.id, f.offering.id, latest.id, '新组反馈');
   assert.deepEqual((await getSubmissionVersion(f.peer.id, f.offering.id, old.id)).version.participants.map(row => row.id).sort(), [f.studentMember.id, f.peerMember.id].sort());
   assert.deepEqual((await getSubmissionVersion(f.newcomer.id, f.offering.id, latest.id)).version.participants.map(row => row.id).sort(), [f.studentMember.id, f.newcomerMember.id].sort());
-  await denied(getSubmissionVersion(f.newcomer.id, f.offering.id, old.id));
+  const shared = (await getSubmissionVersion(f.newcomer.id, f.offering.id, old.id)).version;
+  assert.ok(!shared.participants.some(member => member.id === f.newcomerMember.id));
   await denied(getSubmissionVersion(f.peer.id, f.offering.id, latest.id));
   const oldDetail = await getAssignmentDetail(f.peer.id, f.offering.id, assignment.id);
   assert.deepEqual(oldDetail.versions.map(row => row.id), [old.id]);
   assert.deepEqual(oldDetail.versions[0].feedback.map(row => row.body), ['旧组反馈']);
   const newIndex = (await getAssignmentIndex(f.newcomer.id, f.offering.id)).assignments[0];
-  assert.equal(newIndex.versionCount, 1);
+  assert.equal(newIndex.versionCount, 2);
   assert.equal(newIndex.latestVersion?.id, latest.id);
   const oldIndex = (await getAssignmentIndex(f.peer.id, f.offering.id)).assignments[0];
   assert.equal(oldIndex.versionCount, 1);
@@ -165,13 +178,13 @@ test('小组快照只纳入当前有效学生，未分组与停用成员拒绝�
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.studentMember.id);
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.peerMember.id);
   await db.courseMember.update({ where: { id: f.peerMember.id }, data: { status: 'INACTIVE' } });
-  const version = await submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput('有效组员提交', f.a.id));
+  const version = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '有效组员提交', f.a.id));
   assert.deepEqual((await getSubmissionVersion(f.student.id, f.offering.id, version.id)).version.participants.map(row => row.id), [f.studentMember.id]);
   await denied(submitAssignment(f.peer.id, f.offering.id, assignment.id, submissionInput()));
   await denied(getAssignmentIndex(f.peer.id, f.offering.id));
   await denied(getSubmissionVersion(f.peer.id, f.offering.id, version.id));
   await db.courseMember.update({ where: { id: f.studentMember.id }, data: { status: 'INACTIVE' } });
-  await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, { body: version.body, requestId: version.id }));
+  await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, { ...submissionInput(version.body), requestId: version.id }));
   await denied(getSubmissionVersion(f.student.id, f.offering.id, version.id));
   assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id } }), 1);
 });
@@ -179,7 +192,7 @@ test('小组快照只纳入当前有效学生，未分组与停用成员拒绝�
 test('全期教师与助教可反馈封存版本，学生和没有本期教学身份的管理员不能署名', async () => {
   const f = await fixture();
   const assignment = await createAssignment(f.teacher.id, f.offering.id, input());
-  const version = await submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput());
+  const version = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id));
   await denied(addFeedback(f.student.id, f.offering.id, version.id, '冒名反馈'));
   await denied(addFeedback(f.admin.id, f.offering.id, version.id, '没有教学身份'));
   await denied(addFeedback(f.outsider.id, f.offering.id, version.id, '外部用户'));
@@ -206,14 +219,14 @@ test('跨开课的作业、版本、反馈和重复请求标识均不能越权�
   const f = await fixture(); const other = await fixture();
   const a = await createAssignment(f.teacher.id, f.offering.id, input());
   const b = await createAssignment(other.teacher.id, other.offering.id, input());
-  const version = await submitAssignment(other.student.id, other.offering.id, b.id, submissionInput());
-  await denied(updateAssignment(f.teacher.id, f.offering.id, b.id, input()));
+  const version = await submitAssignment(other.student.id, other.offering.id, b.id, await confirmedSubmissionInput(other.student.id, other.offering.id, b.id));
+  await denied(updateAssignment(f.teacher.id, f.offering.id, b.id, input(), b.revision));
   await denied(submitAssignment(f.student.id, f.offering.id, b.id, submissionInput()));
   await denied(addFeedback(f.teacher.id, f.offering.id, version.id, '越课反馈'));
   await denied(getAssignmentDetail(f.student.id, f.offering.id, b.id));
   await denied(getSubmissionVersion(f.teacher.id, f.offering.id, version.id));
   await denied(getAssignmentIndex(f.outsider.id, f.offering.id));
-  await denied(submitAssignment(f.student.id, f.offering.id, a.id, { requestId: version.id, body: version.body }));
+  await denied(submitAssignment(f.student.id, f.offering.id, a.id, { ...submissionInput(version.body), requestId: version.id }));
   assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id } }), 0);
   assert.equal(await db.review.count({ where: { offeringId: f.offering.id } }), 0);
 });
@@ -223,7 +236,7 @@ test('截止时间以服务端时间为准，恰好到期拒绝；成功请求�
   const now = Date.now() + 60_000;
   const assignment = await createAssignment(f.teacher.id, f.offering.id, input({ dueAt: new Date(now) }));
   t.mock.timers.enable({ apis: ['Date'], now: now - 1 });
-  const request = submissionInput('截止前一毫秒');
+  const request = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '截止前一毫秒');
   const version = await submitAssignment(f.student.id, f.offering.id, assignment.id, request);
   t.mock.timers.setTime(now);
   await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput('恰好到期')));
@@ -237,10 +250,10 @@ test('正文、反馈和提交UUID验证失败不产生容器、版本或反馈'
   const f = await fixture();
   const assignment = await createAssignment(f.teacher.id, f.offering.id, input());
   for (const bad of [{ body: ' ', requestId: randomUUID() }, { body: '长'.repeat(12001), requestId: randomUUID() }, { body: '有效正文', requestId: 'forged' }]) {
-    await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, bad));
+    await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, { ...submissionInput(), ...bad }));
   }
   assert.equal(await db.submission.count({ where: { offeringId: f.offering.id } }), 0);
-  const version = await submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput('长'.repeat(12000)));
+  const version = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '长'.repeat(12000)));
   await denied(addFeedback(f.teacher.id, f.offering.id, version.id, ' '));
   await denied(addFeedback(f.teacher.id, f.offering.id, version.id, '长'.repeat(12001)));
   assert.equal(await db.review.count({ where: { offeringId: f.offering.id } }), 0);
@@ -249,11 +262,11 @@ test('正文、反馈和提交UUID验证失败不产生容器、版本或反馈'
 test('归档课程拒绝所有教学写入，学生和教学团队继续读取历史版本及反馈', async () => {
   const f = await fixture();
   const assignment = await createAssignment(f.teacher.id, f.offering.id, input());
-  const version = await submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput());
+  const version = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id));
   await addFeedback(f.teacher.id, f.offering.id, version.id, '归档前反馈');
   await db.courseOffering.update({ where: { id: f.offering.id }, data: { status: 'ARCHIVED' } });
   await denied(createAssignment(f.teacher.id, f.offering.id, input()));
-  await denied(updateAssignment(f.admin.id, f.offering.id, assignment.id, input({ title: '覆盖归档' })));
+  await denied(updateAssignment(f.admin.id, f.offering.id, assignment.id, input({ title: '覆盖归档' }), assignment.revision));
   await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput()));
   await denied(addFeedback(f.ta.id, f.offering.id, version.id, '归档后反馈'));
   const studentView = await getAssignmentDetail(f.student.id, f.offering.id, assignment.id);
@@ -274,7 +287,7 @@ test('并发调组与提交的归属、提交人及参与者快照保持同一�
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.peerMember.id);
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.newcomerMember.id);
   const [submitted, moved] = await Promise.allSettled([
-    submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput('调组同时提交', f.a.id)),
+    submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '调组同时提交', f.a.id)),
     moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.studentMember.id),
   ]);
   assert.equal(moved.status, 'fulfilled');
@@ -293,30 +306,34 @@ test('并发调组与提交的归属、提交人及参与者快照保持同一�
   assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id, finalizedAt: null } }), 0);
 });
 
-test('处理概览按当前个人的最新封存版计数；旧版反馈不抵扣新版，退出者只保留历史', async () => {
+test('概览按最新封存版评阅状态计数；评论不等于完成，旧版完成不抵扣新版', async () => {
   const f = await fixture();
   const assignment = await createAssignment(f.teacher.id, f.offering.id, input());
   let detail = await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id);
-  assert.deepEqual(detail.summary, { totalExpectedCount: 3, submittedCount: 0, pendingFeedbackCount: 0, feedbackCount: 0 });
+  assert.deepEqual(detail.summary, { totalExpectedCount: 3, submittedCount: 0, pendingFeedbackCount: 0, feedbackCount: 0, completedReviewCount: 0, unknownReviewCount: 0 });
   assert.equal(detail.reviewQueue.length, 3);
   assert.ok(detail.reviewQueue.every(row => row.latestVersionId === null));
-  const first = await submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput('初稿'));
+  const first = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '初稿'));
   await addFeedback(f.teacher.id, f.offering.id, first.id, '第一条反馈');
   await addFeedback(f.ta.id, f.offering.id, first.id, '第二条反馈');
   detail = await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id);
-  assert.deepEqual(detail.summary, { totalExpectedCount: 3, submittedCount: 1, pendingFeedbackCount: 0, feedbackCount: 1 });
+  assert.deepEqual(detail.summary, { totalExpectedCount: 3, submittedCount: 1, pendingFeedbackCount: 1, feedbackCount: 1, completedReviewCount: 0, unknownReviewCount: 0 });
   assert.equal(detail.reviewQueue.find(row => row.id === f.studentMember.id)?.feedbackCount, 2);
   assert.deepEqual((await getAssignmentIndex(f.student.id, f.offering.id)).assignments[0].progress, {
     state: 'FEEDBACK_AVAILABLE', latestVersionId: first.id, feedbackCount: 2,
-  });
-  const second = await submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput('按反馈修改的新稿'));
+   reviewState: 'PENDING' });
+  await setSubmissionReviewState(f.teacher.id, f.offering.id, first.id, { state: 'COMPLETED', expectedRevision: 1 });
+  detail = await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id);
+  assert.equal(detail.summary?.pendingFeedbackCount, 0);
+  assert.equal(detail.summary?.completedReviewCount, 1);
+  const second = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '按反馈修改的新稿'));
   // An unsealed higher version must not become the current reviewed target.
   await db.submissionVersion.create({ data: {
     offeringId: f.offering.id, submissionId: second.submissionId,
     version: 3, submittedById: f.studentMember.id, body: '内部未封存记录',
   } });
   detail = await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id);
-  assert.deepEqual(detail.summary, { totalExpectedCount: 3, submittedCount: 1, pendingFeedbackCount: 1, feedbackCount: 0 });
+  assert.deepEqual(detail.summary, { totalExpectedCount: 3, submittedCount: 1, pendingFeedbackCount: 1, feedbackCount: 0, completedReviewCount: 0, unknownReviewCount: 0 });
   const queueItem = detail.reviewQueue.find(row => row.id === f.studentMember.id)!;
   assert.equal(queueItem.latestVersionId, second.id);
   assert.equal(queueItem.latestVersionNumber, 2);
@@ -325,10 +342,10 @@ test('处理概览按当前个人的最新封存版计数；旧版反馈不抵�
   assert.equal((await getAssignmentIndex(f.teacher.id, f.offering.id)).assignments[0].summary?.pendingFeedbackCount, 1);
   assert.deepEqual((await getAssignmentIndex(f.student.id, f.offering.id)).assignments[0].progress, {
     state: 'SUBMITTED', latestVersionId: second.id, feedbackCount: 0,
-  });
+   reviewState: 'PENDING' });
   await db.courseMember.update({ where: { id: f.studentMember.id }, data: { status: 'INACTIVE' } });
   detail = await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id);
-  assert.deepEqual(detail.summary, { totalExpectedCount: 2, submittedCount: 0, pendingFeedbackCount: 0, feedbackCount: 0 });
+  assert.deepEqual(detail.summary, { totalExpectedCount: 2, submittedCount: 0, pendingFeedbackCount: 0, feedbackCount: 0, completedReviewCount: 0, unknownReviewCount: 0 });
   assert.ok(!detail.reviewQueue.some(row => row.id === f.studentMember.id));
   assert.equal(detail.versions.length, 2);
   assert.equal((await getAssignmentIndex(f.teacher.id, f.offering.id)).assignments[0].versionCount, 2);
@@ -346,9 +363,9 @@ test('小组期待数量排除空组和仅含停用学生的小组；助教负�
     offeringId: f.offering.id, groupId: f.b.id, courseMemberId: f.taMember.id,
     assignedAt: new Date('2020-01-01'), endedAt: new Date('2020-02-01'),
   } });
-  const first = await submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput('A组当前版本', f.a.id));
+  const first = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, 'A组当前版本', f.a.id));
   let detail = await getAssignmentDetail(f.ta.id, f.offering.id, assignment.id);
-  assert.deepEqual(detail.summary, { totalExpectedCount: 2, submittedCount: 1, pendingFeedbackCount: 1, feedbackCount: 0 });
+  assert.deepEqual(detail.summary, { totalExpectedCount: 2, submittedCount: 1, pendingFeedbackCount: 1, feedbackCount: 0, completedReviewCount: 0, unknownReviewCount: 0 });
   assert.equal(detail.reviewQueue.find(row => row.id === f.a.id)?.assignedToMe, true);
   assert.equal(detail.reviewQueue.find(row => row.id === f.b.id)?.assignedToMe, false);
   assert.ok(!detail.reviewQueue.some(row => row.id === emptyGroup.id));
@@ -360,49 +377,50 @@ test('小组期待数量排除空组和仅含停用学生的小组；助教负�
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.studentMember.id);
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.peerMember.id);
   detail = await getAssignmentDetail(f.ta.id, f.offering.id, assignment.id);
-  assert.deepEqual(detail.summary, { totalExpectedCount: 1, submittedCount: 0, pendingFeedbackCount: 0, feedbackCount: 0 });
+  assert.deepEqual(detail.summary, { totalExpectedCount: 1, submittedCount: 0, pendingFeedbackCount: 0, feedbackCount: 0, completedReviewCount: 0, unknownReviewCount: 0 });
   assert.equal(detail.reviewQueue[0].id, f.b.id);
   assert.equal(detail.reviewQueue[0].latestVersionId, null);
   assert.equal(detail.reviewQueue[0].assignedToMe, false);
   assert.deepEqual(detail.versions.map(row => row.id), [first.id]);
 });
 
-test('学生进度只取当前归属的本人快照；调组不继承新组旧提交或旧组反馈，历史仍可读', async () => {
+test('学生进度按当前正式成果，调组可看新组成果而不改变历史参与', async () => {
   const f = await fixture();
   const assignment = await createAssignment(f.teacher.id, f.offering.id, input({ mode: 'GROUP' }));
   let index = (await getAssignmentIndex(f.peer.id, f.offering.id)).assignments[0];
-  assert.deepEqual(index.progress, { state: 'UNGROUPED', latestVersionId: null, feedbackCount: 0 });
+  assert.deepEqual(index.progress, { state: 'UNGROUPED', latestVersionId: null, feedbackCount: 0 , reviewState: null });
   assert.equal(index.summary, null);
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.studentMember.id);
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.peerMember.id);
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.newcomerMember.id);
   assert.equal((await getAssignmentIndex(f.peer.id, f.offering.id)).assignments[0].progress?.state, 'NOT_SUBMITTED');
-  const firstA = await submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput('A组旧版', f.a.id));
-  const firstB = await submitAssignment(f.newcomer.id, f.offering.id, assignment.id, submissionInput('B组旧版', f.b.id));
+  const firstA = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, 'A组旧版', f.a.id));
+  const firstB = await submitAssignment(f.newcomer.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.newcomer.id, f.offering.id, assignment.id, 'B组旧版', f.b.id));
   await addFeedback(f.teacher.id, f.offering.id, firstA.id, 'A组旧反馈');
   await addFeedback(f.ta.id, f.offering.id, firstB.id, 'B组旧反馈');
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.peerMember.id);
   index = (await getAssignmentIndex(f.peer.id, f.offering.id)).assignments[0];
-  assert.deepEqual(index.progress, { state: 'NOT_SUBMITTED', latestVersionId: null, feedbackCount: 0 });
-  assert.equal(index.latestVersion?.id, firstA.id);
-  assert.equal(index.versionCount, 1);
+  assert.deepEqual(index.progress, { state: 'FEEDBACK_AVAILABLE', latestVersionId: firstB.id, feedbackCount: 1, reviewState: 'PENDING' });
+  assert.equal(index.latestVersion?.id, firstB.id);
+  assert.equal(index.versionCount, 2);
   const peerDetail = await getAssignmentDetail(f.peer.id, f.offering.id, assignment.id);
   assert.deepEqual(peerDetail.reviewQueue, []);
   assert.equal(peerDetail.summary, null);
   assert.deepEqual(peerDetail.progress, index.progress);
-  assert.deepEqual(peerDetail.versions.map(row => row.id), [firstA.id]);
+  assert.deepEqual(peerDetail.versions.map(row => row.id), [firstB.id, firstA.id]);
   // The staff's group-level overview is independent of this student's snapshot.
   assert.equal((await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id)).summary?.submittedCount, 2);
-  const secondB = await submitAssignment(f.peer.id, f.offering.id, assignment.id, submissionInput('新成员参与B组', f.b.id));
+  const secondB = await submitAssignment(f.peer.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.peer.id, f.offering.id, assignment.id, '新成员参与B组', f.b.id));
   assert.deepEqual((await getAssignmentIndex(f.peer.id, f.offering.id)).assignments[0].progress, {
     state: 'SUBMITTED', latestVersionId: secondB.id, feedbackCount: 0,
-  });
+   reviewState: 'PENDING' });
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.newcomerMember.id);
   const newcomerIndex = (await getAssignmentIndex(f.newcomer.id, f.offering.id)).assignments[0];
-  assert.deepEqual(newcomerIndex.progress, { state: 'NOT_SUBMITTED', latestVersionId: null, feedbackCount: 0 });
+  assert.deepEqual(newcomerIndex.progress, { state: 'FEEDBACK_AVAILABLE', latestVersionId: firstA.id, feedbackCount: 1, reviewState: 'PENDING' });
   assert.equal(newcomerIndex.latestVersion?.id, secondB.id);
-  assert.equal(newcomerIndex.versionCount, 2);
-  await denied(getSubmissionVersion(f.newcomer.id, f.offering.id, firstA.id));
+  assert.equal(newcomerIndex.versionCount, 3);
+  assert.ok((await getSubmissionVersion(f.newcomer.id, f.offering.id, secondB.id)).version.participants.some(member => member.id === f.newcomerMember.id));
+  assert.ok(!(await getSubmissionVersion(f.newcomer.id, f.offering.id, firstA.id)).version.participants.some(member => member.id === f.newcomerMember.id));
 });
 
 test('个人作业助教负责标记根据学生当前小组，未分组和已结束分工不标记', async () => {
@@ -430,25 +448,26 @@ test('小组提交拒绝旧页面归属或伪造组ID且不写入；已成功UUI
   const f = await fixture();
   const assignment = await createAssignment(f.teacher.id, f.offering.id, input({ mode: 'GROUP' }));
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.studentMember.id);
-  const successful = submissionInput('已经提交给A组', f.a.id);
+  const successful = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '已经提交给A组', f.a.id);
   const first = await submitAssignment(f.student.id, f.offering.id, assignment.id, successful);
-  const stale = submissionInput('还停留在A组旧页面的正文', f.a.id);
+  const stale = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '还停留在A组旧页面的正文', f.a.id);
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.studentMember.id);
   await assert.rejects(submitAssignment(f.student.id, f.offering.id, assignment.id, stale), error => {
     assert.ok(error instanceof DomainError);
     assert.match(error.message, /小组已变化/);
     return true;
   });
-  await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, { body: '缺少预期小组', requestId: randomUUID() }));
+  await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, { body: '缺少预期小组', requestId: randomUUID() } as SubmissionInput));
   assert.equal(await db.submission.count({ where: { assignmentId: assignment.id, groupId: f.b.id } }), 0);
   assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id } }), 1);
   assert.equal(await db.submissionParticipant.count({ where: { offeringId: f.offering.id } }), 1);
   assert.equal((await submitAssignment(f.student.id, f.offering.id, assignment.id, successful)).id, first.id);
-  const current = await submitAssignment(f.student.id, f.offering.id, assignment.id, { ...stale, expectedGroupId: f.b.id });
+  const reconfirmed = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, stale.body);
+  const current = await submitAssignment(f.student.id, f.offering.id, assignment.id, { ...reconfirmed, requestId: stale.requestId });
   assert.equal(current.version, 1);
   assert.notEqual(current.submissionId, first.submissionId);
   const personal = await createAssignment(f.teacher.id, f.offering.id, input());
-  const own = await submitAssignment(f.student.id, f.offering.id, personal.id, submissionInput('个人作业不依赖组ID', f.a.id));
+  const own = await submitAssignment(f.student.id, f.offering.id, personal.id, await confirmedSubmissionInput(f.student.id, f.offering.id, personal.id, '个人作业不依赖组ID', f.a.id));
   assert.ok(own.finalizedAt);
 });
 
@@ -460,17 +479,18 @@ test('TA负责范围概览与详情负责队列一致，覆盖个人和小组作
   await db.taGroupAssignment.create({ data: { offeringId: f.offering.id, courseMemberId: f.taMember.id, groupId: f.a.id } });
   const personal = await createAssignment(f.teacher.id, f.offering.id, input({ title: '个人范围' }));
   const group = await createAssignment(f.teacher.id, f.offering.id, input({ title: '小组范围', mode: 'GROUP' }));
-  await submitAssignment(f.student.id, f.offering.id, personal.id, submissionInput('负责组学生的个人提交'));
-  await submitAssignment(f.newcomer.id, f.offering.id, personal.id, submissionInput('非负责组学生的个人提交'));
-  const firstGroup = await submitAssignment(f.student.id, f.offering.id, group.id, submissionInput('负责组第一版', f.a.id));
-  await submitAssignment(f.newcomer.id, f.offering.id, group.id, submissionInput('非负责组提交', f.b.id));
+  await submitAssignment(f.student.id, f.offering.id, personal.id, await confirmedSubmissionInput(f.student.id, f.offering.id, personal.id, '负责组学生的个人提交'));
+  await submitAssignment(f.newcomer.id, f.offering.id, personal.id, await confirmedSubmissionInput(f.newcomer.id, f.offering.id, personal.id, '非负责组学生的个人提交'));
+  const firstGroup = await submitAssignment(f.student.id, f.offering.id, group.id, await confirmedSubmissionInput(f.student.id, f.offering.id, group.id, '负责组第一版', f.a.id));
+  await submitAssignment(f.newcomer.id, f.offering.id, group.id, await confirmedSubmissionInput(f.newcomer.id, f.offering.id, group.id, '非负责组提交', f.b.id));
   await addFeedback(f.teacher.id, f.offering.id, firstGroup.id, '第一版反馈');
+  await setSubmissionReviewState(f.teacher.id, f.offering.id, firstGroup.id, { state: 'COMPLETED', expectedRevision: 1 });
   const personalIndex = (await getAssignmentIndex(f.ta.id, f.offering.id)).assignments.find(row => row.id === personal.id)!;
-  assert.deepEqual(personalIndex.mineSummary, { totalExpectedCount: 2, submittedCount: 1, pendingFeedbackCount: 1, feedbackCount: 0 });
-  assert.deepEqual(personalIndex.summary, { totalExpectedCount: 3, submittedCount: 2, pendingFeedbackCount: 2, feedbackCount: 0 });
+  assert.deepEqual(personalIndex.mineSummary, { totalExpectedCount: 2, submittedCount: 1, pendingFeedbackCount: 1, feedbackCount: 0, completedReviewCount: 0, unknownReviewCount: 0 });
+  assert.deepEqual(personalIndex.summary, { totalExpectedCount: 3, submittedCount: 2, pendingFeedbackCount: 2, feedbackCount: 0, completedReviewCount: 0, unknownReviewCount: 0 });
   const firstGroupIndex = (await getAssignmentIndex(f.ta.id, f.offering.id)).assignments.find(row => row.id === group.id)!;
-  assert.deepEqual(firstGroupIndex.mineSummary, { totalExpectedCount: 1, submittedCount: 1, pendingFeedbackCount: 0, feedbackCount: 1 });
-  const secondGroup = await submitAssignment(f.peer.id, f.offering.id, group.id, submissionInput('负责组第二版待反馈', f.a.id));
+  assert.deepEqual(firstGroupIndex.mineSummary, { totalExpectedCount: 1, submittedCount: 1, pendingFeedbackCount: 0, feedbackCount: 1, completedReviewCount: 1, unknownReviewCount: 0 });
+  const secondGroup = await submitAssignment(f.peer.id, f.offering.id, group.id, await confirmedSubmissionInput(f.peer.id, f.offering.id, group.id, '负责组第二版待反馈', f.a.id));
   const index = await getAssignmentIndex(f.ta.id, f.offering.id);
   for (const assignment of index.assignments) {
     const detail = await getAssignmentDetail(f.ta.id, f.offering.id, assignment.id);
@@ -478,14 +498,17 @@ test('TA负责范围概览与详情负责队列一致，覆盖个人和小组作
     const expected = {
       totalExpectedCount: mine.length,
       submittedCount: mine.filter(row => row.latestVersionId !== null).length,
-      pendingFeedbackCount: mine.filter(row => row.latestVersionId !== null && row.feedbackCount === 0).length,
+      pendingFeedbackCount: mine.filter(row => row.latestVersionId !== null && row.reviewState === 'PENDING').length,
       feedbackCount: mine.filter(row => row.latestVersionId !== null && row.feedbackCount > 0).length,
+      completedReviewCount: mine.filter(row => row.latestVersionId !== null && row.reviewState === 'COMPLETED').length,
+      unknownReviewCount: mine.filter(row => row.latestVersionId !== null && row.reviewState === 'LEGACY_UNKNOWN').length,
     };
     assert.deepEqual(assignment.mineSummary, expected);
     assert.deepEqual(detail.mineSummary, expected);
   }
   assert.deepEqual(index.assignments.find(row => row.id === group.id)!.mineSummary, {
     totalExpectedCount: 1, submittedCount: 1, pendingFeedbackCount: 1, feedbackCount: 0,
+    completedReviewCount: 0, unknownReviewCount: 0,
   });
   const groupDetail = await getAssignmentDetail(f.ta.id, f.offering.id, group.id);
   assert.equal(groupDetail.reviewQueue.find(row => row.assignedToMe)?.latestVersionId, secondGroup.id);
@@ -496,8 +519,8 @@ test('无有效分工的TA仅得到空负责统计；学生、教师和管理员
   const f = await fixture();
   const assignment = await createAssignment(f.teacher.id, f.offering.id, input());
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.studentMember.id);
-  await submitAssignment(f.student.id, f.offering.id, assignment.id, submissionInput());
-  const empty = { totalExpectedCount: 0, submittedCount: 0, pendingFeedbackCount: 0, feedbackCount: 0 };
+  await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id));
+  const empty = { totalExpectedCount: 0, submittedCount: 0, pendingFeedbackCount: 0, feedbackCount: 0, completedReviewCount: 0, unknownReviewCount: 0 };
   assert.deepEqual((await getAssignmentIndex(f.ta.id, f.offering.id)).assignments[0].mineSummary, empty);
   const ended = await db.taGroupAssignment.create({ data: {
     offeringId: f.offering.id, courseMemberId: f.taMember.id, groupId: f.a.id,
@@ -517,4 +540,355 @@ test('无有效分工的TA仅得到空负责统计；学生、教师和管理员
     assert.equal(detail.mineSummary, null);
     assert.ok(detail.reviewQueue.every(row => !row.assignedToMe));
   }
+});
+
+test('提交必须明确确认要求与最新归属版本，缺失确认不能创建容器', async () => {
+  const f = await fixture();
+  const assignment = await createAssignment(f.teacher.id, f.offering.id, input());
+  const confirmed = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id);
+  for (const key of ['expectedAssignmentRevision', 'expectedLatestSubmissionToken', 'expectedGroupId'] as const) {
+    const incomplete: Partial<SubmissionInput> = { ...confirmed, requestId: randomUUID() };
+    delete incomplete[key];
+    await assert.rejects(submitAssignment(f.student.id, f.offering.id, assignment.id, incomplete as SubmissionInput), /缺少提交确认/);
+  }
+  assert.equal(await db.submission.count({ where: { assignmentId: assignment.id } }), 0);
+  assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id } }), 0);
+});
+
+test('更新参考原型后保留提交时的网址，旧表核对只链接新网址，已撤回资料的名称仍为文字', async () => {
+  const { teacher, student, offering } = await fixture();
+  const material = await createResource(teacher.id, offering.id, {
+    title: 'https://example.test/material-title', body: '测前记录表',
+    url: 'https://example.test/actual-material', status: 'PUBLISHED',
+  });
+  const reference = assignmentMaterialLink(offering.id, material);
+  const originalUrl = 'https://design.example.test/prototype?rev=1';
+  const revisedUrl = 'https://design.example.test/prototype?rev=2';
+  const original = `先测试无台阶路线 ${originalUrl}，再记录第一步。\n${reference}`;
+  const revised = `先测试无台阶路线 ${revisedUrl}，再记录第一步。\n${reference}`;
+  const assignment = await createAssignment(teacher.id, offering.id, input({ description: original }));
+  const first = await submitAssignment(student.id, offering.id, assignment.id,
+    await confirmedSubmissionInput(student.id, offering.id, assignment.id, '第一版观察'));
+  const stale = await confirmedSubmissionInput(student.id, offering.id, assignment.id, '尚未核对新参考作品的观察');
+  const updated = await updateAssignment(teacher.id, offering.id, assignment.id, input({ description: revised }), assignment.revision);
+  await changeResourceStatus(teacher.id, offering.id, material.id, { status: 'ARCHIVED', expectedRevision: material.revision });
+
+  await assert.rejects(submitAssignment(student.id, offering.id, assignment.id, stale), error => {
+    assert.ok(error instanceof SubmissionConflictError);
+    assert.deepEqual(error.reasons, ['requirements']);
+    const requirements = error.submissionContext.requirements;
+    assert.equal(requirements.revision, updated.revision);
+    assert.equal(requirements.description, revised.replace(reference, material.title));
+    const parts = requirements.descriptionParts;
+    assert.ok(parts);
+    assert.equal(parts.map(part => part.text).join(''), requirements.description);
+    assert.deepEqual(parts.filter(part => part.href).map(part => [part.text, part.href]), [[revisedUrl, revisedUrl]]);
+    assert.ok(!JSON.stringify(parts).includes(material.id));
+    assert.ok(!JSON.stringify(parts).includes('https://example.test/actual-material'));
+    return true;
+  });
+  const detail = await getAssignmentDetail(student.id, offering.id, assignment.id);
+  assert.equal(detail.assignment.description, revised);
+  assert.deepEqual(detail.versions.map(version => version.id), [first.id]);
+  assert.equal(detail.versions[0].assignmentRevision?.description, original);
+  assert.equal(detail.versions[0].assignmentRevision?.revision, assignment.revision);
+});
+
+test('旧要求提交被拒并返回当前要求，明确重新确认后保留原请求号提交', async () => {
+  const f = await fixture();
+  const assignment = await createAssignment(f.teacher.id, f.offering.id, input({ description: '访谈三人' }));
+  const request = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '保留的学生正文');
+  const changed = await updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ description: '访谈五人' }), assignment.revision);
+  await assert.rejects(submitAssignment(f.student.id, f.offering.id, assignment.id, request), error => {
+    assert.ok(error instanceof SubmissionConflictError);
+    assert.deepEqual(error.reasons, ['requirements']);
+    assert.equal(error.submissionContext.requirements.description, '访谈五人');
+    assert.equal(error.submissionContext.confirmation.assignmentRevision, changed.revision);
+    assert.equal(error.submissionContext.latestSubmission, null);
+    return true;
+  });
+  assert.equal(request.body, '保留的学生正文');
+  assert.equal(await db.submission.count({ where: { assignmentId: assignment.id } }), 0);
+  const checked = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, request.body);
+  const version = await submitAssignment(f.student.id, f.offering.id, assignment.id, { ...checked, requestId: request.requestId });
+  assert.equal(version.assignmentRevision?.revision, changed.revision);
+  // Retrying an already accepted request is a read, even if its confirmation is
+  // now stale and the course was subsequently archived.
+  await updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ description: '再次变更' }), changed.revision);
+  await db.courseOffering.update({ where: { id: f.offering.id }, data: { status: 'ARCHIVED' } });
+  assert.equal((await submitAssignment(f.student.id, f.offering.id, assignment.id, { ...checked, requestId: request.requestId })).id, version.id);
+  assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id } }), 1);
+});
+
+test('组员有新提交时旧页面须重新确认，只有可读最新版本可作为冲突摘要', async () => {
+  const f = await fixture();
+  const assignment = await createAssignment(f.teacher.id, f.offering.id, input({ mode: 'GROUP' }));
+  await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.studentMember.id);
+  await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.peerMember.id);
+  const stale = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '仍在编写的正文');
+  const peer = await submitAssignment(f.peer.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.peer.id, f.offering.id, assignment.id, '组员先交的正文'));
+  await assert.rejects(submitAssignment(f.student.id, f.offering.id, assignment.id, stale), error => {
+    assert.ok(error instanceof SubmissionConflictError);
+    assert.deepEqual(error.reasons, ['latest_submission']);
+    assert.equal(error.submissionContext.latestSubmission?.id, peer.id);
+    assert.equal(error.submissionContext.latestSubmission?.body, '组员先交的正文');
+    assert.equal(error.submissionContext.latestSubmission?.submittedByName, 'peer');
+    return true;
+  });
+  assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id } }), 1);
+
+  await moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.newcomerMember.id);
+  const privateOld = await submitAssignment(f.newcomer.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.newcomer.id, f.offering.id, assignment.id, '新组既有正文'));
+  await moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.studentMember.id);
+  const current = (await getAssignmentDetail(f.student.id, f.offering.id, assignment.id)).submissionContext!;
+  assert.equal(current.latestSubmission?.id, privateOld.id);
+  assert.match(current.confirmation.latestSubmissionToken, /^[a-f\d]{64}$/);
+  assert.equal(current.latestSubmission?.body, '新组既有正文');
+  await assert.rejects(submitAssignment(f.student.id, f.offering.id, assignment.id, stale), error => {
+    assert.ok(error instanceof SubmissionConflictError);
+    assert.ok(error.reasons.includes('group'));
+    assert.equal(error.submissionContext.latestSubmission?.id, privateOld.id);
+    return true;
+  });
+  const checked = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, stale.body);
+  const latest = await submitAssignment(f.student.id, f.offering.id, assignment.id, { ...checked, requestId: stale.requestId });
+  assert.equal(latest.version, 2);
+  assert.ok(!(await getSubmissionVersion(f.student.id, f.offering.id, privateOld.id)).version.participants.some(member => member.id === f.studentMember.id));
+});
+
+test('要求变更与提交并发时成功版本只能绑定学生已确认的要求', async () => {
+  const f = await fixture();
+  const assignment = await createAssignment(f.teacher.id, f.offering.id, input({ description: '确认过的要求' }));
+  const request = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id);
+  const [submitted, changed] = await Promise.allSettled([
+    submitAssignment(f.student.id, f.offering.id, assignment.id, request),
+    updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ description: '并发新要求' }), assignment.revision),
+  ]);
+  assert.equal(changed.status, 'fulfilled');
+  if (submitted.status === 'fulfilled') {
+    assert.equal(submitted.value.assignmentRevision?.revision, request.expectedAssignmentRevision);
+    assert.equal(submitted.value.assignmentRevision?.description, '确认过的要求');
+  } else {
+    assert.ok(submitted.reason instanceof SubmissionConflictError);
+    assert.ok(submitted.reason.reasons.includes('requirements'));
+    assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id } }), 0);
+  }
+});
+
+test('独立评阅状态记录操作者与历史，评论不完成评阅，完成可明确重新打开', async () => {
+  const f = await fixture();
+  const assignment = await createAssignment(f.teacher.id, f.offering.id, input());
+  const version = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id));
+  let detail = await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id);
+  assert.equal(detail.versions[0].reviewState.state, 'PENDING');
+  assert.equal(detail.versions[0].reviewState.revision, 1);
+  assert.equal(detail.versions[0].reviewState.updatedBy, null);
+  assert.deepEqual(detail.versions[0].reviewHistory.map(row => [row.state, row.actor, row.isBaseline]), [['PENDING', null, false]]);
+  await addFeedback(f.ta.id, f.offering.id, version.id, '这是一条讨论留言');
+  detail = await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id);
+  assert.equal(detail.summary?.pendingFeedbackCount, 1);
+  assert.equal(detail.summary?.feedbackCount, 1);
+  assert.equal(detail.summary?.completedReviewCount, 0);
+  assert.equal(detail.versions[0].reviewState.revision, 1);
+  const complete = await setSubmissionReviewState(f.ta.id, f.offering.id, version.id, { state: 'COMPLETED', expectedRevision: 1 });
+  assert.deepEqual(complete, { state: 'COMPLETED', revision: 2 });
+  const student = await getAssignmentDetail(f.student.id, f.offering.id, assignment.id);
+  assert.equal(student.versions[0].reviewState.state, 'COMPLETED');
+  assert.equal(student.progress?.reviewState, 'COMPLETED');
+  assert.equal(student.versions[0].reviewState.updatedBy?.id, f.taMember.id);
+  assert.ok(student.versions[0].reviewState.updatedAt instanceof Date);
+  const reopened = await setSubmissionReviewState(f.teacher.id, f.offering.id, version.id, { state: 'PENDING', expectedRevision: 2 });
+  assert.equal(reopened.revision, 3);
+  detail = await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id);
+  assert.equal(detail.summary?.pendingFeedbackCount, 1);
+  assert.equal(detail.summary?.completedReviewCount, 0);
+  assert.equal(detail.versions[0].reviewState.updatedBy?.id, f.teacherMember.id);
+  assert.deepEqual(detail.versions[0].reviewHistory.map(row => [row.revision, row.state]), [[3, 'PENDING'], [2, 'COMPLETED'], [1, 'PENDING']]);
+  const events = await db.submissionReviewEvent.findMany({ where: { versionId: version.id }, orderBy: { revision: 'asc' } });
+  await assert.rejects(db.submissionReviewEvent.update({ where: { id: events[1].id }, data: { state: 'PENDING' } }));
+  await assert.rejects(db.submissionReviewEvent.delete({ where: { id: events[1].id } }));
+  assert.equal((await db.submissionVersion.findUniqueOrThrow({ where: { id: version.id } })).body, version.body);
+});
+
+test('评阅确认只允许本期教学身份，归档拒绝，旧状态并发修改仅一份成功', async () => {
+  const f = await fixture(), other = await fixture();
+  const assignment = await createAssignment(f.teacher.id, f.offering.id, input());
+  const version = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id));
+  for (const actor of [f.student, f.admin, f.outsider, other.teacher]) {
+    await denied(setSubmissionReviewState(actor.id, f.offering.id, version.id, { state: 'COMPLETED', expectedRevision: 1 }));
+  }
+  await denied(setSubmissionReviewState(f.teacher.id, other.offering.id, version.id, { state: 'COMPLETED', expectedRevision: 1 }));
+  const results = await Promise.allSettled([f.teacher, f.ta].map(actor => setSubmissionReviewState(actor.id, f.offering.id, version.id, { state: 'COMPLETED', expectedRevision: 1 })));
+  assert.equal(results.filter(row => row.status === 'fulfilled').length, 1);
+  assert.equal(results.filter(row => row.status === 'rejected' && row.reason instanceof ReviewRevisionConflictError).length, 1);
+  const completedWithoutComments = await getAssignmentDetail(f.student.id, f.offering.id, assignment.id);
+  assert.equal(completedWithoutComments.progress?.state, 'SUBMITTED');
+  assert.equal(completedWithoutComments.progress?.feedbackCount, 0);
+  assert.equal(completedWithoutComments.progress?.reviewState, 'COMPLETED');
+  assert.equal(await db.submissionReviewEvent.count({ where: { versionId: version.id } }), 2);
+  await assert.rejects(setSubmissionReviewState(f.teacher.id, f.offering.id, version.id, { state: 'PENDING', expectedRevision: 1 }), ReviewRevisionConflictError);
+  await db.courseOffering.update({ where: { id: f.offering.id }, data: { status: 'ARCHIVED' } });
+  await denied(setSubmissionReviewState(f.teacher.id, f.offering.id, version.id, { state: 'PENDING', expectedRevision: 2 }));
+  assert.equal((await getAssignmentDetail(f.student.id, f.offering.id, assignment.id)).versions[0].reviewState.state, 'COMPLETED');
+  assert.equal(await db.submissionReviewEvent.count({ where: { versionId: version.id } }), 2);
+});
+
+test('无状态行的历史评论显示未知且不催评，首次明确操作以revision0创建状态和审计', async () => {
+  const f = await fixture();
+  const assignment = await createAssignment(f.teacher.id, f.offering.id, input());
+  const submission = await db.submission.create({ data: { offeringId: f.offering.id, assignmentId: assignment.id, courseMemberId: f.studentMember.id } });
+  const version = await db.submissionVersion.create({ data: { offeringId: f.offering.id, submissionId: submission.id, version: 1, body: '旧导入版本', submittedById: f.studentMember.id } });
+  await db.submissionParticipant.create({ data: { offeringId: f.offering.id, versionId: version.id, courseMemberId: f.studentMember.id } });
+  await db.submissionVersion.update({ where: { id: version.id }, data: { finalizedAt: new Date() } });
+  let detail = await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id);
+  assert.equal(detail.versions[0].reviewState.state, 'PENDING');
+  assert.equal(detail.versions[0].reviewState.revision, 0);
+  await addFeedback(f.teacher.id, f.offering.id, version.id, '迁移前或导入的评论');
+  detail = await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id);
+  assert.equal(detail.versions[0].reviewState.state, 'LEGACY_UNKNOWN');
+  assert.equal(detail.summary?.pendingFeedbackCount, 0);
+  assert.equal(detail.summary?.unknownReviewCount, 1);
+  assert.equal((await getAssignmentDetail(f.student.id, f.offering.id, assignment.id)).progress?.reviewState, 'LEGACY_UNKNOWN');
+  assert.equal(detail.summary?.completedReviewCount, 0);
+  assert.deepEqual(detail.versions[0].reviewHistory, []);
+  await denied(setSubmissionReviewState(f.teacher.id, f.offering.id, version.id, { state: 'COMPLETED', expectedRevision: 1 }));
+  const confirmed = await setSubmissionReviewState(f.teacher.id, f.offering.id, version.id, { state: 'COMPLETED', expectedRevision: 0 });
+  assert.equal(confirmed.revision, 1);
+  detail = await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id);
+  assert.equal(detail.summary?.unknownReviewCount, 0);
+  assert.equal(detail.summary?.completedReviewCount, 1);
+  assert.equal(detail.versions[0].reviewHistory[0].actor?.id, f.teacherMember.id);
+  assert.equal(detail.versions[0].reviewHistory[0].isBaseline, false);
+  assert.equal(await db.submissionReviewEvent.count({ where: { versionId: version.id } }), 1);
+});
+
+test('未封存版本不能确认评阅，旧版完成不自动完成学生后续新版本', async () => {
+  const f = await fixture();
+  const assignment = await createAssignment(f.teacher.id, f.offering.id, input());
+  const first = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id));
+  await setSubmissionReviewState(f.teacher.id, f.offering.id, first.id, { state: 'COMPLETED', expectedRevision: 1 });
+  const second = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '新的独立版本'));
+  const draft = await db.submissionVersion.create({ data: { offeringId: f.offering.id, submissionId: second.submissionId, version: 3, body: '未封存', submittedById: f.studentMember.id } });
+  await denied(setSubmissionReviewState(f.teacher.id, f.offering.id, draft.id, { state: 'COMPLETED', expectedRevision: 0 }));
+  const detail = await getAssignmentDetail(f.teacher.id, f.offering.id, assignment.id);
+  assert.equal(detail.summary?.pendingFeedbackCount, 1);
+  assert.equal(detail.summary?.completedReviewCount, 0);
+  assert.equal(detail.versions.find(row => row.id === first.id)?.reviewState.state, 'COMPLETED');
+  assert.equal(detail.versions.find(row => row.id === second.id)?.reviewState.state, 'PENDING');
+  assert.equal(detail.reviewQueue.find(row => row.id === f.studentMember.id)?.reviewState, 'PENDING');
+});
+
+test('重新确认后要求或组员最新提交再次变化，同一未成功请求仍必须再次核对', async () => {
+  const f = await fixture();
+  const assignment = await createAssignment(f.teacher.id, f.offering.id, input({ mode: 'GROUP', description: '要求一' }));
+  await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.studentMember.id);
+  await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.peerMember.id);
+  let request = await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, '两次冲突也要保留的正文');
+  const requestId = request.requestId;
+  const secondRequirements = await updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ mode: 'GROUP', description: '要求二' }), 1);
+  let current: SubmissionConflictError | null = null;
+  try { await submitAssignment(f.student.id, f.offering.id, assignment.id, request); }
+  catch (error) { assert.ok(error instanceof SubmissionConflictError); current = error; }
+  assert.ok(current);
+  request = { ...request, expectedAssignmentRevision: current.submissionContext.confirmation.assignmentRevision };
+  const thirdRequirements = await updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ mode: 'GROUP', description: '要求三' }), secondRequirements.revision);
+  await assert.rejects(submitAssignment(f.student.id, f.offering.id, assignment.id, request), error => {
+    assert.ok(error instanceof SubmissionConflictError);
+    assert.deepEqual(error.reasons, ['requirements']);
+    assert.equal(error.submissionContext.requirements.revision, thirdRequirements.revision);
+    return true;
+  });
+  assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id } }), 0);
+  request = { ...await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id, request.body), requestId };
+  const firstPeer = await submitAssignment(f.peer.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.peer.id, f.offering.id, assignment.id, '组员第一版'));
+  current = null;
+  try { await submitAssignment(f.student.id, f.offering.id, assignment.id, request); }
+  catch (error) { assert.ok(error instanceof SubmissionConflictError); current = error; }
+  assert.ok(current);
+  assert.equal(current.submissionContext.latestSubmission?.id, firstPeer.id);
+  request = { ...request, expectedLatestSubmissionToken: current.submissionContext.confirmation.latestSubmissionToken };
+  const secondPeer = await submitAssignment(f.peer.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.peer.id, f.offering.id, assignment.id, '组员第二版'));
+  await assert.rejects(submitAssignment(f.student.id, f.offering.id, assignment.id, request), error => {
+    assert.ok(error instanceof SubmissionConflictError);
+    assert.deepEqual(error.reasons, ['latest_submission']);
+    assert.equal(error.submissionContext.latestSubmission?.id, secondPeer.id);
+    return true;
+  });
+  assert.equal(request.requestId, requestId);
+  assert.equal(request.body, '两次冲突也要保留的正文');
+  assert.equal(await db.submissionVersion.count({ where: { offeringId: f.offering.id } }), 2);
+  assert.equal(await db.submissionVersion.count({ where: { id: requestId } }), 0);
+});
+
+test('正式成果支持附件重试、权限及更正时保留原件', async () => {
+  const f = await fixture();
+  const assignment = await createAssignment(f.teacher.id, f.offering.id, input({ mode: 'GROUP' }));
+  await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.studentMember.id);
+  await moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.peerMember.id);
+  const request = { ...await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id), body: '',
+    uploads: [{ name: '材料.csv', bytes: new Uint8Array([1, 2, 3]) }, { name: '附注.txt', bytes: new Uint8Array([4]) }] };
+  const original = await submitAssignment(f.student.id, f.offering.id, assignment.id, request);
+  assert.equal((await submitAssignment(f.student.id, f.offering.id, assignment.id, request)).id, original.id);
+  await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, { ...request, uploads: [{ name: '材料.csv', bytes: new Uint8Array([9]) }] }));
+  const first = (await getSubmissionVersion(f.student.id, f.offering.id, original.id)).version;
+  assert.equal(first.attachments.length, 2);
+  const material = first.attachments.find(file => file.name === '材料.csv')!;
+  assert.deepEqual((await getSubmissionAttachment(f.student.id, f.offering.id, assignment.id, original.id, material.id))?.bytes, new Uint8Array([1, 2, 3]));
+  assert.equal(await getSubmissionAttachment(f.peer.id, f.offering.id, assignment.id, original.id, material.id), null);
+  await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.newcomerMember.id);
+  assert.ok(await getSubmissionAttachment(f.newcomer.id, f.offering.id, assignment.id, original.id, material.id));
+  const latest = await submitAssignment(f.student.id, f.offering.id, assignment.id, {
+    ...await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id), retainedFileIds: [material.id],
+  });
+  assert.deepEqual((await getSubmissionVersion(f.student.id, f.offering.id, latest.id)).version.attachments.map(file => file.id), [material.id]);
+  assert.equal((await getSubmissionVersion(f.student.id, f.offering.id, original.id)).version.attachments.length, 2);
+  assert.equal(await db.fileObject.count({ where: { offeringId: f.offering.id } }), 2);
+});
+
+test('截止后只允许指定已交成果在有效期限内更正，并可撤销', async () => {
+  const f = await fixture();
+  const assignment = await createAssignment(f.teacher.id, f.offering.id, input());
+  const first = await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id));
+  await updateAssignment(f.teacher.id, f.offering.id, assignment.id, input({ dueAt: new Date(Date.now() - 60_000) }), assignment.revision);
+  const getRequest = (id: string) => confirmedSubmissionInput(id, f.offering.id, assignment.id);
+  const until = new Date(Date.now() + 60_000);
+  await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, await getRequest(f.student.id)));
+  await denied(setSubmissionCorrectionWindow(f.teacher.id, f.offering.id, assignment.id, 'missing', 0, until));
+  await setSubmissionCorrectionWindow(f.ta.id, f.offering.id, assignment.id, first.submissionId, 0, until);
+  await denied(submitAssignment(f.peer.id, f.offering.id, assignment.id, await getRequest(f.peer.id)));
+  const updated = await submitAssignment(f.student.id, f.offering.id, assignment.id, await getRequest(f.student.id));
+  assert.equal(updated.submissionId, first.submissionId);
+  assert.equal(updated.version, 2);
+  const stale = await getRequest(f.student.id);
+  await setSubmissionCorrectionWindow(f.teacher.id, f.offering.id, assignment.id, first.submissionId, 1, null);
+  await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, stale));
+  await denied(submitAssignment(f.student.id, f.offering.id, assignment.id, await getRequest(f.student.id)));
+  assert.equal(await db.submissionCorrectionEvent.count({ where: { submissionId: first.submissionId } }), 2);
+});
+
+test('作业成果只为本期教学团队恢复已验证的小组或学生来源', async () => {
+  const f = await fixture();
+  const other = await fixture();
+  const assignment = await createAssignment(f.teacher.id, f.offering.id, input({ mode: 'GROUP' }));
+  await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.studentMember.id);
+  await submitAssignment(f.student.id, f.offering.id, assignment.id, await confirmedSubmissionInput(f.student.id, f.offering.id, assignment.id));
+  await moveStudentToGroup(f.teacher.id, f.offering.id, f.b.id, f.studentMember.id);
+  const activity = await createCourseSubpage(f.teacher.id, f.offering.id, '汇报活动');
+  const foreignActivity = await createCourseSubpage(other.teacher.id, other.offering.id, '其他课的活动');
+  const lookup = (userId: string, query: Parameters<typeof getTeachingResultSource>[3]) =>
+    getTeachingResultSource(userId, f.offering.id, assignment.id, query);
+  const source = { fromMember: f.studentMember.id, fromGroup: f.a.id, fromPage: activity.id };
+  const base = `/courses/${f.offering.id}`;
+  const member = await lookup(f.ta.id, source);
+  assert.equal(member?.name, f.student.name);
+  assert.equal(member?.href, `${base}/members/${f.studentMember.id}?fromGroup=${f.a.id}&fromPage=${activity.id}`);
+  assert.equal((await lookup(f.teacher.id, { fromGroup: f.a.id, fromPage: foreignActivity.id }))?.href, `${base}/groups/${f.a.id}`);
+  assert.equal(await lookup(f.student.id, source), null);
+  assert.equal(await lookup(f.admin.id, source), null);
+  assert.equal(await lookup(f.teacher.id, { ...source, fromMember: f.peerMember.id }), null);
+  assert.equal(await lookup(f.teacher.id, { fromMember: f.peerMember.id }), null);
+  assert.equal(await lookup(f.teacher.id, { fromGroup: f.b.id }), null);
+  assert.equal(await lookup(f.teacher.id, { fromMember: other.studentMember.id }), null);
+  assert.equal(await lookup(f.teacher.id, { ...source, fromPage: [activity.id] }), null);
+  assert.equal(parseTeachingResultSource({ fromGroup: 'https://example.invalid' }), null);
 });

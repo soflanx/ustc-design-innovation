@@ -1,0 +1,10 @@
+.section { margin-top: 10px; scroll-margin-top: 24px; }
+.section > summary { width: fit-content; padding-block: 7px; color: var(--accent); font-size: 15px; cursor: pointer; }
+.content, .form, .comparison { display: grid; gap: 14px; min-width: 0; }
+.content { max-width: 720px; padding-block: 12px 4px; }
+.content > a { justify-self: start; font-size: 14px; }
+.comparison { padding: 14px; border-left: 2px solid var(--line); background: var(--surface-muted); }
+.savedText { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (pointer: coarse) {
+  .section > summary, .content > a { min-height: 44px; }
+}

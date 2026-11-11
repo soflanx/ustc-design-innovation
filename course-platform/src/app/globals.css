@@ -229,9 +229,19 @@ fieldset { min-width: 0; }
 /* Course identity is context, not a second navigation control. */
 .header-identity { display: flex; align-items: center; gap: 24px; min-width: 0; }
 .header-course { border-left: 1px solid var(--line); padding-left: 24px; color: var(--ink); font-size: 14px; line-height: 1.5; }
+.workspace-shell > .site-header .header-identity { flex: 1; }
+.workspace-shell > .site-header .header-course { min-width: 0; }
+.workspace-shell > .site-header .header-space { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.workspace-shell > .site-header .site-nav { flex-shrink: 0; gap: 20px; }
+.workspace-shell > .site-header .site-nav > .workspace-site-link { color: var(--muted); font-size: 13px; }
+.workspace-shell > .site-header .account-name { display: inline-block; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 @media (max-width: 740px) {
   .header-identity { gap: 16px; }
   .header-course { padding-left: 16px; }
-  .course-site-header .header-inner { row-gap: 0; padding-bottom: 0; }
-  .course-site-header .site-nav { justify-content: space-between; }
+  .workspace-shell > .site-header .header-inner { flex-wrap: wrap; row-gap: 0; padding-block: 10px 4px; }
+  .workspace-shell > .site-header .header-identity { flex-basis: 100%; }
+  .workspace-shell > .site-header .site-nav { width: 100%; flex-wrap: nowrap; justify-content: flex-start; gap: 16px; }
+  .workspace-shell > .site-header .site-nav > a, .workspace-shell > .site-header .account-menu summary { min-height: 44px; }
+  .workspace-shell > .site-header .account-menu { min-width: 0; margin-left: auto; }
+  .workspace-shell > .site-header .account-name { max-width: min(36vw, 10rem); }
 }

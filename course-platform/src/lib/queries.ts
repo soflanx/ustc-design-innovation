@@ -12,28 +12,47 @@ export async function getPublishedPosts() {
   return posts.map(post => ({ ...post, category: post.type, offeringLabel: post.offering?.title ?? null }));
 }
 
-/** Public homepage news, scoped to the featured course or explicitly unbound posts. */
-export async function getPublicCourseNews(courseId?: string) {
-  const news = await db.post.findMany({
+/** Public reports from the courses shown on the homepage, plus unbound news. */
+export function getPublicCourseNews(courseIds: readonly string[]) {
+  return db.post.findMany({
     where: {
       ...publishedWhere,
       publishedAt: { lte: new Date() },
       type: 'NEWS',
-      OR: courseId ? [{ offering: { courseId } }, { offeringId: null }] : [{ offeringId: null }],
+      OR: [{ offering: { courseId: { in: [...courseIds] } } }, { offeringId: null }],
     },
-    include: { offering: { select: { title: true } } },
+    select: { slug: true, title: true, publishedAt: true },
     orderBy: [{ publishedAt: 'desc' }, { id: 'asc' }],
     take: 6,
   });
-  return news.map(post => ({ ...post, category: post.type, offeringLabel: post.offering?.title ?? null }));
+}
+
+export function getPublicOfferingNews(offeringId: string) {
+  return db.post.findMany({
+    where: {
+      ...publishedWhere,
+      publishedAt: { lte: new Date() },
+      type: 'NEWS',
+      offeringId,
+      offering: { status: { in: ['ACTIVE', 'ARCHIVED'] } },
+    },
+    select: { slug: true, title: true, publishedAt: true },
+    orderBy: [{ publishedAt: 'desc' }, { id: 'asc' }],
+  });
 }
 
 export async function getPublishedPost(slug: string) {
   const post = await db.post.findFirst({
     where: { ...publishedWhere, publishedAt: { lte: new Date() }, slug },
-    include: { offering: { select: { title: true } } },
+    select: {
+      slug: true, type: true, title: true, excerpt: true, body: true, publishedAt: true,
+      offering: {
+        where: { status: { in: ['ACTIVE', 'ARCHIVED'] } },
+        select: { id: true, title: true },
+      },
+    },
   });
-  return post ? { ...post, category: post.type, offeringLabel: post.offering?.title ?? null } : null;
+  return post ? { ...post, category: post.type } : null;
 }
 
 export function getPublicCourses() {

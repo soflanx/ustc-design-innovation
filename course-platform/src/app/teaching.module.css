@@ -6,6 +6,9 @@
 }
 
 .heading { margin-bottom: 28px; }
+.assignmentListHeading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 20px; }
+.assignmentTitleRow { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px 24px; margin-top: 14px; }
+.assignmentTitleRow > :global(.button) { flex-shrink: 0; }
 .heading h1 {
   margin: 0;
   color: var(--ink);
@@ -62,7 +65,7 @@
 .empty { padding-block: 14px; color: var(--muted); font-size: 14px; }
 
 .versions { display: grid; gap: 32px; }
-.version { padding-top: 28px; border-top: 1px solid var(--line); scroll-margin-top: 24px; }
+.version { overflow-wrap: anywhere; padding-top: 28px; border-top: 1px solid var(--line); scroll-margin-top: 24px; }
 .version:first-child { padding-top: 0; border-top: 0; }
 .versionHeader { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 12px; }
 .versionHeader h3 { color: var(--ink); font-size: 17px; font-weight: 600; }
@@ -110,6 +113,16 @@
 .queueRow > a:hover { text-decoration: underline; }
 .requirements summary { color: var(--accent); font-size: 16px; font-weight: 600; }
 .requirements p { margin-top: 20px; }
+.cancellationReason { margin-top: 8px; color: var(--muted); font-size: 14px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.revisionDetails { margin-top: 16px; }
+.revisionDetails > summary { width: fit-content; max-width: 100%; padding-block: 6px; color: var(--accent); font-size: 14px; line-height: 1.7; cursor: pointer; }
+.revisionList { display: grid; gap: 12px; margin-top: 12px; padding: 0; list-style: none; }
+.revisionList > li { padding-left: 16px; border-left: 1px solid var(--line); }
+.revisionList .revisionDetails { margin-top: 0; }
+.revisionContent { padding-top: 12px; }
+.revisionContent h4 { color: var(--ink); font-size: 15px; font-weight: 600; }
+.revisionContent .meta { margin-top: 8px; }
+.revisionContent .body { margin-top: 12px; font-size: 15px; }
 
 @media (max-width: 740px) {
   .heading { margin-bottom: 24px; }
@@ -118,6 +131,7 @@
   .card { padding-block: 24px; }
   .card h2, .section h2 { font-size: 20px; }
   .cardHeading { align-items: start; flex-wrap: wrap; gap: 6px 20px; }
+  .assignmentTitleRow { flex-wrap: wrap; }
   .cardAction { min-height: 44px; display: inline-flex; align-items: center; }
   .main { gap: 32px; margin-top: 28px; }
   .formGrid { grid-template-columns: minmax(0, 1fr); }
@@ -132,3 +146,13 @@
   .queueRow > a { justify-self: end; min-height: 44px; }
   .page :global(.button) { min-height: 44px; }
 }
+
+.versionReview { margin-block: 24px; padding-block: 16px; border-block: 1px solid var(--line); }
+.versionReviewHeading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; font-size: 14px; }
+.versionReviewHeading > span { color: var(--muted); font-size: 12px; }
+.reviewStateControls { margin-top: 12px; }
+.reviewStateActions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.reviewStateActions span { color: var(--muted); font-size: 12px; }
+.reviewHistory { margin-top: 12px; color: var(--muted); font-size: 12px; line-height: 1.8; }
+.reviewHistory summary { width: fit-content; cursor: pointer; }
+.reviewHistory ol { padding-left: 20px; margin: 8px 0 0; }

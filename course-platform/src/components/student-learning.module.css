@@ -1,0 +1,21 @@
+.page { min-width: 0; max-width: var(--course-prose-width); margin-inline: auto; }
+.heading h1 { font-size: clamp(28px, 3vw, 38px); font-weight: 600; margin: 18px 0 14px; }
+.notice { border-left: 2px solid var(--line); padding-left: 15px; margin-top: 18px; }
+.records, .record { scroll-margin-top: 100px; }
+.records { margin-top: 28px; }
+.section + .section { margin-top: 32px; }
+.section h2 { font-size: 20px; font-weight: 600; margin-bottom: 10px; }
+.list, .previousVersions, .groupHistory ul { list-style: none; padding: 0; margin: 0; }
+.record { padding: 8px 0 14px; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.record h3 { font-size: 17px; font-weight: 600; line-height: 1.55; }
+.messageBody { margin: 12px 0; color: var(--ink); font-size: 16px; line-height: 1.85; white-space: pre-wrap; }
+.record h3 a, .previousVersions a { display: inline-block; padding-block: 10px; min-height: 44px; }
+.meta, .empty, .notice, .groupHistory li { color: var(--muted); font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; }
+.disclosure { margin-top: 4px; }
+.disclosure summary, .groupHistory summary { width: fit-content; min-height: 44px; padding-block: 10px; color: var(--accent); font-size: 14px; cursor: pointer; }
+.previousVersions { border-left: 2px solid var(--line); padding-left: 14px; }
+.previousVersions li + li { margin-top: 6px; }
+.previousVersions a { font-size: 14px; }
+.groupHistory { border-top: 1px solid var(--line); margin-top: 26px; }
+.groupHistory li { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 0; }
+.groupHistory strong { color: var(--ink); }

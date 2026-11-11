@@ -4,6 +4,7 @@ import { PageShell } from '@/components/site-shell';
 import { getCurrentUser } from '@/lib/auth';
 import { getPublicCourses, getMyMemberships } from '@/lib/queries';
 import { displayDate } from '@/lib/policy';
+import { offeringCourseTitle } from '@/lib/course-label';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,7 @@ export default async function CoursesPage() {
       const member = user?.isAdmin || memberOfferings.has(offering.id);
       const actionLabel = member ? historical ? '查看课程记录' : '进入课程' : '查看开课信息';
       return <Link key={offering.id} className={`${styles.catalogEntry} ${historical ? styles.historicalEntry : ''}`} href={`/courses/${offering.id}`}>
-        <div><h2>{course.title}</h2><p className={styles.entryTerm}>{offering.term.name}</p><p className={styles.entryDates}>{displayDate(offering.term.startDate)} — {displayDate(offering.term.endDate)}</p></div>
+        <div><h2>{offeringCourseTitle({ ...offering, course })}</h2><p className={styles.entryTerm}>{offering.term.name}</p><p className={styles.entryDates}>{displayDate(offering.term.startDate)} — {displayDate(offering.term.endDate)}</p></div>
         <span className={styles.entryAction}>{actionLabel}<span aria-hidden="true">→</span></span>
       </Link>;
     })}</div>;

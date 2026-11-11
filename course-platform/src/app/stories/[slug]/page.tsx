@@ -1,27 +1,25 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PageShell } from '@/components/site-shell';
-import { studentStories } from '@/lib/home-editorial';
+import { getCurrentUser } from '@/lib/auth';
+import { stories } from '@/lib/home-editorial';
 import styles from '../../editorial-record.module.css';
-
-export function generateStaticParams() {
-  return studentStories.map(({ slug }) => ({ slug }));
-}
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const story = studentStories.find(item => item.slug === slug);
-  return { title: story ? story.title : '记录未找到' };
+  const story = stories.find(item => item.slug === slug);
+  return { title: story ? story.title : '故事未找到' };
 }
 
 export default async function StoryPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const storyIndex = studentStories.findIndex(item => item.slug === slug);
-  const story = studentStories[storyIndex];
+  const storyIndex = stories.findIndex(item => item.slug === slug);
+  const story = stories[storyIndex];
   if (!story) notFound();
-  const next = studentStories[(storyIndex + 1) % studentStories.length];
+  const user = await getCurrentUser();
+  const next = stories[(storyIndex + 1) % stories.length];
 
-  return <PageShell><article className={styles.record}>
+  return <PageShell currentUser={user}><article className={styles.record}>
     <Link className={styles.back} href="/stories">← 全部故事</Link>
     <header className={styles.header}>
       <p className={styles.meta}><span>{story.category}</span><span>{story.kicker}</span><span>展示样稿</span></p>
@@ -30,10 +28,10 @@ export default async function StoryPage({ params }: { params: Promise<{ slug: st
     </header>
     {story.image && <figure className={styles.figure}><img src={story.image.src} alt={story.image.alt} width={story.image.width} height={story.image.height} style={{ objectPosition: story.imagePosition }}/><figcaption>{story.image.caption}</figcaption></figure>}
     <div className={styles.body}>
-      <p className={styles.note}>学生记录展示样稿：下文为虚构的匿名叙事，用于展示个人与小组经历的阅读方式；图片仅作场景示意。</p>
+      <p className={styles.note}>故事展示样稿：下文为虚构叙事，用于展示人物经历与项目过程；图片仅作场景示意。</p>
       {story.sections.map(section => <section className={styles.section} key={section.title}><h2>{section.title}</h2><p>{section.body}</p></section>)}
       <p className={styles.takeaway}>{story.takeaway}</p>
-      <nav className={styles.continue} aria-label="继续浏览"><Link href="/#stories">返回首页学生记录 ↗</Link><Link href="/courses">了解课程与学期 →</Link></nav>
+      <nav className={styles.continue} aria-label="继续浏览"><Link href="/#stories">返回首页故事 ↗</Link><Link href="/courses">了解课程与学期 →</Link></nav>
     </div>
     {next && <aside className={styles.next}><p>下一篇 · {next.category}</p><Link href={`/stories/${next.slug}`}>{next.title}<span aria-hidden="true">→</span></Link></aside>}
   </article></PageShell>;
