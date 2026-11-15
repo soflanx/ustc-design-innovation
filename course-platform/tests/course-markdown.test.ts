@@ -68,7 +68,7 @@ test('正文 HTML 显示为文字，不安全链接和图片不会产生可执�
 test('同一句和列表中的教学引用用原件标题和链接连续阅读', () => {
   const html = render('先看[旧课名](course:pages/intro)，再做[旧作业名](course:assignments/prototype)。\n\n- [旧文件名](course:resources/worksheet)', catalog);
   assert.match(html, /<p>先看<a [^>]+>第一课 · 观察与记录<\/a>，再做<a [^>]+>初版原型<\/a><span[^>]*>（<time datetime="2026-11-11T09:00:00\.000Z"[^>]*>[^<]+ 截止<\/time>）<\/span>。<\/p>/i);
-  assert.match(html, /<li><a [^>]+>访谈工作表<\/a><\/li>/);
+  assert.match(html, /<li><a [^>]+>访谈工作表<\/a><button [^>]*aria-label="预览访谈工作表"[^>]*>预览<\/button><\/li>/);
   for (const href of [`${base}/pages/intro`, `${base}/assignments/prototype?fromPage=intro`, `${base}/resources/worksheet/open`]) {
     assert.ok(html.includes(`href="${href}"`), href);
   }

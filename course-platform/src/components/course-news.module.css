@@ -1,0 +1,41 @@
+.workspace {
+  display: grid;
+  gap: 24px;
+  max-width: var(--course-prose-width);
+  margin-inline: auto;
+  overflow-wrap: anywhere;
+}
+.heading, .tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+.heading h1 { font-family: var(--sans); font-size: clamp(26px, 4vw, 32px); line-height: 1.3; }
+.tools a, .status a { display: inline-flex; align-items: center; min-height: 44px; font-size: 14px; }
+.meta, .status { color: var(--muted); font-size: 14px; }
+.status { display: flex; flex-wrap: wrap; align-items: center; gap: 0 16px; }
+.posts { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.posts li { border-bottom: 1px solid var(--line); }
+.post { display: grid; gap: 4px; padding-block: 16px; color: var(--ink); text-decoration: none; }
+.post h2 { font-size: 18px; font-weight: 600; line-height: 1.5; }
+.post:hover { text-decoration: none; }
+.post:hover h2 { text-decoration: underline; }
+.preview { min-width: 0; }
+.preview > :first-child { margin-top: 0; }
+.editor, .fields, .coverFields { display: grid; min-width: 0; gap: 18px; }
+.fields { padding: 0; margin: 0; border: 0; }
+.coverFields { padding-top: 16px; border-top: 1px solid var(--line); }
+.coverFields figure { margin: 0; }
+.coverFields img { display: block; max-width: 100%; width: auto; max-height: 184px; height: auto; }
+.coverFields figcaption { margin-top: 6px; color: var(--muted); font-size: 13px; }
+.coverFields input[type='file'] { max-width: 100%; }
+.coverControl { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 14px; }
+.coverControl label { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; }
+.editor a { min-width: 0; }
+.editor button { min-height: 44px; }
+.release { display: grid; gap: 8px; padding-top: 20px; border-top: 1px solid var(--line); }
+.release h2 { font-size: 20px; }
+.release summary { width: fit-content; min-height: 44px; padding-block: 10px; color: var(--accent); }
+.release details form { padding-block: 4px 12px; }

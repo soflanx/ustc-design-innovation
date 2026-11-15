@@ -9,6 +9,10 @@ export function canManageOffering(isAdmin: boolean, membership: Membership) {
   return isAdmin || (membership?.status === 'ACTIVE' && membership.role === 'TEACHER');
 }
 
+export function isActiveTeachingMember(membership: Membership) {
+  return membership?.status === 'ACTIVE' && (membership.role === 'TEACHER' || membership.role === 'TA');
+}
+
 export function canViewGroup(isAdmin: boolean, membership: Membership, isActiveGroupMember: boolean) {
   if (isAdmin) return true;
   if (membership?.status !== 'ACTIVE') return false;

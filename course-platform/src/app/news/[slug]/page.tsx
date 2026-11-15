@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { NewsArticle } from '@/components/news-article';
 import { PageShell } from '@/components/site-shell';
 import { getCurrentUser } from '@/lib/auth';
 import { getPublishedPost } from '@/lib/queries';
@@ -17,13 +18,29 @@ export default async function PostPage({ params, searchParams }: {
   const { slug } = await params;
   const [post, user, { from }] = await Promise.all([getPublishedPost(slug), getCurrentUser(), searchParams]);
   if (!post) notFound();
-  const image = getPostImage(post.slug);
-  const demo = post.category === 'PROJECT' ? getProjectDemo(post.slug) : undefined;
   const { offering } = post;
-  const backToCourse = post.category === 'NEWS' && offering && from === offering.id
-    ? `/courses/${encodeURIComponent(offering.id)}?view=public#course-reports`
-    : null;
-  const continueExploring = post.category === 'PROJECT' && <section className={styles.continue} aria-labelledby="continue-exploring-title">
+  if (post.category === 'NEWS') {
+    const offeringHref = offering ? `/courses/${encodeURIComponent(offering.id)}` : undefined;
+    const backToCourse = offering && from === offering.id ? `${offeringHref}?view=public#course-reports` : null;
+    const { publishedCover } = post;
+    const legacyCover = post.useLegacyCover ? getPostImage(post.slug) : undefined;
+    const cover = publishedCover && {
+      src: `/news/${encodeURIComponent(post.slug)}/cover/${encodeURIComponent(publishedCover.id)}`,
+      alt: publishedCover.alt,
+      caption: publishedCover.caption,
+      width: publishedCover.width ?? undefined,
+      height: publishedCover.height ?? undefined,
+    };
+    return <PageShell currentUser={user}><article className="container section article-page">
+      <Link className="breadcrumb" href={backToCourse ?? '/news'}>← {backToCourse ? '返回开课信息' : '返回新闻'}</Link>
+      <NewsArticle title={post.title} excerpt={post.excerpt} body={post.body} publishedAt={post.publishedAt}
+        offeringLabel={offering?.title} offeringHref={offeringHref} cover={cover ?? legacyCover}/>
+    </article></PageShell>;
+  }
+
+  const image = getPostImage(post.slug);
+  const demo = getProjectDemo(post.slug);
+  const continueExploring = <section className={styles.continue} aria-labelledby="continue-exploring-title">
     <h2 id="continue-exploring-title">继续探索</h2>
     <nav aria-label="继续探索"><Link href="/projects">全部项目 →</Link><Link href={offering ? `/courses/${offering.id}` : '/courses'}>{offering ? '查看所属学期公开信息' : '查看课程公开信息'} →</Link></nav>
   </section>;
@@ -57,9 +74,9 @@ export default async function PostPage({ params, searchParams }: {
     </article></PageShell>;
   }
   return <PageShell currentUser={user}><article className="container section article-page">
-    <Link className="breadcrumb" href={backToCourse ?? (post.category === 'PROJECT' ? '/projects' : '/news')}>← {backToCourse ? '返回开课信息' : post.category === 'PROJECT' ? '全部项目' : '返回新闻'}</Link>
+    <Link className="breadcrumb" href="/projects">← 全部项目</Link>
     <header className="article-header">
-      <p className="muted">{post.category === 'PROJECT' ? '项目专题' : '课程新闻'}{offering && <> · {post.category === 'NEWS' ? <Link href={`/courses/${offering.id}`}>{offering.title}</Link> : offering.title}</>}</p>
+      <p className="muted">项目专题{offering && <> · {offering.title}</>}</p>
       <h1>{post.title}</h1>
       <p className="article-excerpt">{post.excerpt}</p>
       {post.publishedAt && <time className="muted" dateTime={post.publishedAt.toISOString()}>{displayDate(post.publishedAt)}</time>}

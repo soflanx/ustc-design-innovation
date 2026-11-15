@@ -1,23 +1,15 @@
+import type { Prisma } from '@prisma/client';
 import { db } from './db';
 
-const publishedWhere = { status: 'PUBLISHED' as const, visibility: 'PUBLIC' as const, publishedAt: { lte: new Date() } };
-
-export async function getPublishedPosts() {
-  const posts = await db.post.findMany({
-    where: { ...publishedWhere, publishedAt: { lte: new Date() } },
-    include: { offering: { select: { title: true } } },
-    orderBy: { publishedAt: 'desc' },
-    take: 12,
-  });
-  return posts.map(post => ({ ...post, category: post.type, offeringLabel: post.offering?.title ?? null }));
+export function publicPostVisibility(now = new Date()): Prisma.PostWhereInput {
+  return { status: 'PUBLISHED', visibility: 'PUBLIC', publishedAt: { lte: now } };
 }
 
 /** Public reports from the courses shown on the homepage, plus unbound news. */
 export function getPublicCourseNews(courseIds: readonly string[]) {
   return db.post.findMany({
     where: {
-      ...publishedWhere,
-      publishedAt: { lte: new Date() },
+      ...publicPostVisibility(),
       type: 'NEWS',
       OR: [{ offering: { courseId: { in: [...courseIds] } } }, { offeringId: null }],
     },
@@ -30,7 +22,7 @@ export function getPublicCourseNews(courseIds: readonly string[]) {
 /** Every public news report, newest first, for the news index. */
 export function getPublicNews() {
   return db.post.findMany({
-    where: { ...publishedWhere, publishedAt: { lte: new Date() }, type: 'NEWS' },
+    where: { ...publicPostVisibility(), type: 'NEWS' },
     select: { slug: true, title: true, excerpt: true, publishedAt: true },
     orderBy: [{ publishedAt: 'desc' }, { id: 'asc' }],
   });
@@ -39,8 +31,7 @@ export function getPublicNews() {
 export function getPublicOfferingNews(offeringId: string) {
   return db.post.findMany({
     where: {
-      ...publishedWhere,
-      publishedAt: { lte: new Date() },
+      ...publicPostVisibility(),
       type: 'NEWS',
       offeringId,
       offering: { status: { in: ['ACTIVE', 'ARCHIVED'] } },
@@ -52,9 +43,10 @@ export function getPublicOfferingNews(offeringId: string) {
 
 export async function getPublishedPost(slug: string) {
   const post = await db.post.findFirst({
-    where: { ...publishedWhere, publishedAt: { lte: new Date() }, slug },
+    where: { ...publicPostVisibility(), slug },
     select: {
-      slug: true, type: true, title: true, excerpt: true, body: true, publishedAt: true,
+      slug: true, type: true, title: true, excerpt: true, body: true, publishedAt: true, publishedRevision: true, useLegacyCover: true,
+      publishedCover: { select: { id: true, alt: true, caption: true, width: true, height: true } },
       offering: {
         where: { status: { in: ['ACTIVE', 'ARCHIVED'] } },
         select: { id: true, title: true },
@@ -64,19 +56,22 @@ export async function getPublishedPost(slug: string) {
   return post ? { ...post, category: post.type } : null;
 }
 
-/** Public project records, newest first, with the term they belong to when that offering is public. */
-export function getPublicProjects(take?: number) {
-  return db.post.findMany({
-    where: { ...publishedWhere, publishedAt: { lte: new Date() }, type: 'PROJECT' },
-    select: {
-      slug: true, title: true, excerpt: true, coverLabel: true, publishedAt: true,
-      offering: {
-        where: { status: { in: ['ACTIVE', 'ARCHIVED'] } },
-        select: { id: true, title: true, term: { select: { name: true } }, course: { select: { slug: true, title: true } } },
-      },
+export function getPublishedNewsCover(slug: string, imageId: string) {
+  return db.newsImage.findFirst({
+    where: {
+      id: imageId,
+      publicSlot: { is: { ...publicPostVisibility(), slug, type: 'NEWS', publishedRevision: { not: null } } },
     },
+    select: { bytes: true, contentType: true },
+  });
+}
+
+/** Existing editorial project articles retain their published archive. */
+export function getLegacyPublicProjects() {
+  return db.post.findMany({
+    where: { ...publicPostVisibility(), type: 'PROJECT' },
+    select: { slug: true, title: true, excerpt: true },
     orderBy: [{ publishedAt: 'desc' }, { id: 'asc' }],
-    take,
   });
 }
 

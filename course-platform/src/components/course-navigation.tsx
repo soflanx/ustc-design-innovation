@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { CourseRole } from '@/lib/policy';
 import styles from './course-navigation.module.css';
 
-export type CourseSection = 'overview' | 'lessons' | 'members' | 'records' | 'learning' | 'assignments' | 'resources' | 'groups' | 'feedback' | 'team' | 'manage';
+export type CourseSection = 'overview' | 'lessons' | 'members' | 'records' | 'learning' | 'assignments' | 'resources' | 'groups' | 'feedback' | 'team' | 'news' | 'manage';
 
 export function CourseNavigation({ offeringId, active, canManage = false, canViewClassRecords = false, role, groupHref, variant = 'tabs' }: { offeringId: string; active: CourseSection; canManage?: boolean; canViewClassRecords?: boolean; role?: CourseRole; groupHref?: string; variant?: 'tabs' | 'sidebar' }) {
   const student = role === 'STUDENT';
@@ -20,6 +20,7 @@ export function CourseNavigation({ offeringId, active, canManage = false, canVie
       ['learning', `/courses/${offeringId}/learning`, '本学期记录'],
     ] : canViewClassRecords ? [] : [groupLink]),
     ['team', `/courses/${offeringId}/team`, '教学团队'],
+    ...(canViewClassRecords ? [['news', `/courses/${encodeURIComponent(offeringId)}/news`, '课程新闻']] : []),
     ...(canManage ? [['manage', `/courses/${offeringId}/manage`, '课程管理']] : []),
   ];
   const links = [...primary, ...secondary];

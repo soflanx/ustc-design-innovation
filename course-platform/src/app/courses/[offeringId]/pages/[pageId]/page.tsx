@@ -18,11 +18,12 @@ export default async function CourseSubpageRoute({ params, searchParams }: {
   const directory = `/courses/${encodeURIComponent(offeringId)}/pages`;
   const path = `${directory}/${encodeURIComponent(pageId)}`;
   const records = query.view === 'records';
+  const includeWithdrawn = records && query.includeWithdrawn === '1';
   const origin = parseTeachingResultSource(query);
   const requested = origin ? teachingResultSourceParams(origin) : new URLSearchParams();
   if (records) {
     requested.set('view', 'records');
-    if (query.includeWithdrawn === '1') requested.set('includeWithdrawn', '1');
+    if (includeWithdrawn) requested.set('includeWithdrawn', '1');
   } else if (query.edit === '1') requested.set('edit', '1');
   const { user, offering, membership } = await requireOfferingAccess(offeringId, false, requested.size ? `${path}?${requested}` : path);
   const teachingMember = membership?.status === 'ACTIVE' && (membership.role === 'TEACHER' || membership.role === 'TA');
@@ -39,7 +40,8 @@ export default async function CourseSubpageRoute({ params, searchParams }: {
   const recordsHref = `${path}?${recordParams}`;
   const title = page.publishedAt ? page.title : page.draft?.title ?? page.title;
 
-  return <CourseFrame user={user} offering={offering} membership={membership} active="lessons" groupSourcePageId={page.id}>
+  return <CourseFrame user={user} offering={offering} membership={membership} active="lessons" groupSourcePageId={page.id}
+    groupSourceLessonRecords={records ? { includeWithdrawn } : undefined}>
     <div className={styles.lesson}>
       <header className={styles.heading}>
         <Link className={`breadcrumb ${styles.back}`} href={source?.href ?? directory}>← {source?.label ?? '课次'}</Link>
@@ -52,7 +54,7 @@ export default async function CourseSubpageRoute({ params, searchParams }: {
         <Link href={recordsHref} prefetch={false} aria-current={records ? 'page' : undefined}>课堂记录</Link>
       </nav>}
       {records ? <LessonRecords authorId={user.id} offeringId={offeringId} pageId={page.id}
-        includeWithdrawn={query.includeWithdrawn === '1'} recordsHref={recordsHref}/>
+        includeWithdrawn={includeWithdrawn} recordsHref={recordsHref}/>
         : content && <CourseAuthoredPage externalTitle authorId={user.id} offeringId={offeringId} subpageId={page.id} page={page} catalog={content.catalog}
           canEdit={canEdit} canManageRecords={content.teaching.canManage} courseStatus={offering.status}
           initialIntent={query.edit === '1' ? 'edit' : undefined}/>}

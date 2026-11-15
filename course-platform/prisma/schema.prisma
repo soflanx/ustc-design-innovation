@@ -53,6 +53,11 @@ enum Visibility {
   OFFERING
 }
 
+enum GroupShowcaseScope {
+  CLASS
+  PUBLIC
+}
+
 enum PostType {
   NEWS
   PROJECT
@@ -94,6 +99,7 @@ model User {
   sessions    AuthSession[]
   posts       Post[]
   files       FileObject[]
+  submissionUploadDiscards SubmissionUploadDiscard[]
   createdAssignments Assignment[] @relation("AssignmentCreator")
   createdResources Resource[] @relation("ResourceCreator")
   assignmentRevisions AssignmentRevision[]
@@ -183,6 +189,10 @@ model CourseMember {
   offering         CourseOffering          @relation(fields: [offeringId], references: [id], onDelete: Restrict)
   user             User                    @relation(fields: [userId], references: [id], onDelete: Restrict)
   groupMemberships GroupMember[]
+  authoredGroupActivities GroupActivity[]
+  groupActivityParticipation GroupActivityParticipant[]
+  publishedGroupShowcases GroupShowcasePublication[] @relation("GroupShowcasePublisher")
+  withdrawnGroupShowcases GroupShowcasePublication[] @relation("GroupShowcaseWithdrawer")
   taAssignments    TaGroupAssignment[]
   submissions      Submission[]
   participants     SubmissionParticipant[]
@@ -218,6 +228,9 @@ model Group {
   taAssignments TaGroupAssignment[]
   submissions   Submission[]
   page          GroupPage?
+  activities    GroupActivity[]
+  showcaseDraft GroupShowcaseDraft?
+  showcasePublications GroupShowcasePublication[]
   observations TeachingObservation[] @relation("ObservationTargetGroup")
   observationContexts TeachingObservation[] @relation("ObservationContextGroup")
   feedback TeachingFeedback[]
@@ -273,6 +286,8 @@ model Assignment {
   grades      GradeRecord[]
   focusLinks  CourseFocusAssignment[]
   revisions AssignmentRevision[]
+  stagedUploads SubmissionUpload[]
+  uploadDiscards SubmissionUploadDiscard[]
 
   @@unique([id, offeringId])
   @@index([offeringId, status])
@@ -334,6 +349,7 @@ model SubmissionVersion {
   submission   Submission              @relation(fields: [submissionId, offeringId], references: [id, offeringId], onDelete: Restrict)
   participants SubmissionParticipant[]
   files        SubmissionFile[]
+  showcaseMaterials GroupShowcaseMaterial[]
   reviews      Review[]
   reviewState SubmissionVersionReview?
   observations TeachingObservation[]
@@ -451,11 +467,54 @@ model FileObject {
   mimeType     String
   sizeBytes    BigInt
   bytes        Bytes?
+  chunked      Boolean          @default(false)
   createdAt    DateTime         @default(now())
   owner        User             @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   submissions  SubmissionFile[]
+  chunks       FileObjectChunk[]
+  submissionUpload SubmissionUpload?
+  groupActivities GroupActivityFile[]
+  showcaseMaterials GroupShowcaseMaterial[]
 
   @@unique([id, offeringId])
+}
+
+model FileObjectChunk {
+  fileId String
+  index  Int
+  bytes  Bytes
+  file   FileObject @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@id([fileId, index])
+}
+
+model SubmissionUpload {
+  fileId        String @id
+  offeringId    String
+  assignmentId  String
+  receivedBytes Int @default(0)
+  digest        String?
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  file          FileObject @relation(fields: [fileId, offeringId], references: [id, offeringId], onDelete: Cascade)
+  assignment    Assignment @relation(fields: [assignmentId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@unique([fileId, offeringId])
+  @@index([expiresAt, fileId])
+}
+
+model SubmissionUploadDiscard {
+  ownerId      String
+  offeringId   String
+  assignmentId String
+  fileId       String
+  expiresAt    DateTime
+  owner        User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  assignment   Assignment @relation(fields: [assignmentId, offeringId], references: [id, offeringId], onDelete: Cascade)
+
+  @@id([ownerId, offeringId, assignmentId, fileId])
+  @@index([expiresAt])
+  @@index([assignmentId, offeringId])
 }
 
 model SubmissionFile {
@@ -466,6 +525,7 @@ model SubmissionFile {
   file       FileObject        @relation(fields: [fileId, offeringId], references: [id, offeringId], onDelete: Restrict)
 
   @@id([versionId, fileId])
+  @@index([fileId])
 }
 
 model Resource {
@@ -564,13 +624,52 @@ model Post {
   status      ContentStatus   @default(DRAFT)
   visibility  Visibility      @default(OFFERING)
   publishedAt DateTime?
+  revision    Int             @default(0)
+  publishedRevision Int?
+  creationFingerprint String?
+  useLegacyCover Boolean      @default(true)
+  publishedCoverId String?
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
   offering    CourseOffering? @relation(fields: [offeringId], references: [id], onDelete: Restrict)
   author      User            @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  draft       PostNewsDraft?
+  images      NewsImage[]     @relation("NewsImages")
+  publishedCover NewsImage?   @relation("PublishedNewsCover", fields: [publishedCoverId, id], references: [id, postId], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([status, visibility, publishedAt])
   @@index([offeringId, type])
+  @@unique([publishedCoverId, id])
+}
+
+model PostNewsDraft {
+  postId         String @id
+  title          String
+  excerpt        String
+  body           String
+  useLegacyCover Boolean @default(false)
+  coverId        String?
+  post           Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  cover          NewsImage? @relation("DraftNewsCover", fields: [coverId, postId], references: [id, postId], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([coverId, postId])
+}
+
+model NewsImage {
+  id          String @id @default(cuid())
+  postId      String
+  alt         String
+  caption     String
+  width       Int
+  height      Int
+  contentType String
+  bytes       Bytes
+  post        Post @relation("NewsImages", fields: [postId], references: [id], onDelete: Cascade)
+  publicSlot  Post? @relation("PublishedNewsCover")
+  draftSlot   PostNewsDraft? @relation("DraftNewsCover")
+
+  @@unique([id, postId])
+  @@index([postId])
 }
 
 model GroupPage {
@@ -587,6 +686,109 @@ model GroupPage {
   group      Group         @relation(fields: [groupId, offeringId], references: [id, offeringId], onDelete: Restrict)
 
   @@unique([groupId, offeringId])
+}
+
+model GroupActivity {
+  id                 String   @id
+  offeringId         String
+  groupId            String
+  authorId           String
+  body               String   @default("")
+  nextStep           String   @default("")
+  occurredOn         DateTime? @db.Date
+  createdAt          DateTime @default(now())
+  withdrawnAt        DateTime?
+  requestFingerprint String
+  group              Group @relation(fields: [groupId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  author             CourseMember @relation(fields: [authorId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  participants       GroupActivityParticipant[]
+  files              GroupActivityFile[]
+  showcaseMaterials  GroupShowcaseMaterial[]
+
+  @@unique([id, offeringId])
+  @@index([offeringId, groupId, withdrawnAt, createdAt])
+}
+
+model GroupActivityParticipant {
+  offeringId     String
+  activityId     String
+  courseMemberId String
+  activity       GroupActivity @relation(fields: [activityId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  courseMember   CourseMember @relation(fields: [courseMemberId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@id([activityId, courseMemberId])
+}
+
+model GroupActivityFile {
+  offeringId String
+  activityId String
+  fileId     String
+  position   Int
+  activity   GroupActivity @relation(fields: [activityId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  file       FileObject @relation(fields: [fileId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@id([activityId, fileId])
+  @@unique([activityId, position])
+}
+
+model GroupShowcaseDraft {
+  groupId    String @id
+  offeringId String
+  revision   Int @default(1)
+  title      String
+  summary    String
+  body       String
+  selections Json
+  group      Group @relation(fields: [groupId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@unique([groupId, offeringId])
+}
+
+model GroupShowcasePublication {
+  id           String @id @default(cuid())
+  offeringId   String
+  groupId      String
+  scope        GroupShowcaseScope
+  sequence     Int
+  draftRevision Int
+  title        String
+  summary      String
+  body         String
+  groupName    String
+  publisherId  String
+  publishedAt  DateTime @default(now())
+  supersededAt DateTime?
+  withdrawnAt  DateTime?
+  withdrawnById String?
+  group        Group @relation(fields: [groupId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  publisher    CourseMember @relation("GroupShowcasePublisher", fields: [publisherId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  withdrawer   CourseMember? @relation("GroupShowcaseWithdrawer", fields: [withdrawnById, offeringId], references: [id, offeringId], onDelete: Restrict)
+  materials     GroupShowcaseMaterial[]
+
+  @@unique([id, offeringId])
+  @@unique([offeringId, groupId, scope, sequence])
+}
+
+model GroupShowcaseMaterial {
+  id            String @id @default(cuid())
+  offeringId    String
+  publicationId String
+  position      Int
+  caption       String
+  sourceLabel   String
+  text          String?
+  fileId        String?
+  fileName      String?
+  image         Boolean @default(false)
+  activityId    String?
+  versionId     String?
+  publication   GroupShowcasePublication @relation(fields: [publicationId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  activity      GroupActivity? @relation(fields: [activityId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  version       SubmissionVersion? @relation(fields: [versionId, offeringId], references: [id, offeringId], onDelete: Restrict)
+  file          FileObject? @relation(fields: [fileId, offeringId], references: [id, offeringId], onDelete: Restrict)
+
+  @@unique([publicationId, position])
+  @@index([fileId])
 }
 
 model TeachingNote {

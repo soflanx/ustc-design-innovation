@@ -8,6 +8,7 @@ import { changeResourceStatus, createResource } from '../src/lib/resource-servic
 import type { SubmissionInput } from '../src/lib/submission-contract';
 import { createCourseSubpage } from '../src/lib/course-subpages';
 import { getTeachingResultSource, parseTeachingResultSource } from '../src/lib/teaching-result-source';
+import { streamStoredFile } from '../src/lib/stored-file';
 import { confirmedSubmissionInput } from './submission-fixture';
 import {
   type AssignmentInput, createAssignment, updateAssignment, submitAssignment, addFeedback,
@@ -833,7 +834,9 @@ test('正式成果支持附件重试、权限及更正时保留原件', async ()
   const first = (await getSubmissionVersion(f.student.id, f.offering.id, original.id)).version;
   assert.equal(first.attachments.length, 2);
   const material = first.attachments.find(file => file.name === '材料.csv')!;
-  assert.deepEqual((await getSubmissionAttachment(f.student.id, f.offering.id, assignment.id, original.id, material.id))?.bytes, new Uint8Array([1, 2, 3]));
+  const originalFile = await getSubmissionAttachment(f.student.id, f.offering.id, assignment.id, original.id, material.id);
+  assert.ok(originalFile);
+  assert.deepEqual(new Uint8Array(await new Response(streamStoredFile(originalFile)).arrayBuffer()), new Uint8Array([1, 2, 3]));
   assert.equal(await getSubmissionAttachment(f.peer.id, f.offering.id, assignment.id, original.id, material.id), null);
   await moveStudentToGroup(f.teacher.id, f.offering.id, f.a.id, f.newcomerMember.id);
   assert.ok(await getSubmissionAttachment(f.newcomer.id, f.offering.id, assignment.id, original.id, material.id));

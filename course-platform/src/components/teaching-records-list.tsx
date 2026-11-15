@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { groupWorkHref } from '@/lib/group-work-link';
+import { groupWorkHref, setLessonRecordOrigin } from '@/lib/group-work-link';
 import { displayDate } from '@/lib/policy';
 import { formatTeachingDate } from '@/lib/teaching-format';
 import type { getTeachingObservations } from '@/lib/teaching-observations';
@@ -18,7 +18,7 @@ function SavedTime({ value }: { value: Date }) {
 }
 
 export function TeachingRecordsList({
-  offeringId, authorId, notes, resultHref, lessonHref, contextGroupHref, historyContext, historyPlacement, withdrawnHistoryHref,
+  offeringId, authorId, notes, resultHref, lessonHref, contextGroupHref, historyContext, historyPlacement, withdrawnHistoryHref, lessonIncludeWithdrawn,
 }: {
   offeringId: string;
   authorId: string;
@@ -29,9 +29,11 @@ export function TeachingRecordsList({
   historyContext?: 'member' | 'group' | 'lesson';
   historyPlacement?: 'result' | 'lesson' | 'standalone';
   withdrawnHistoryHref?: string;
+  lessonIncludeWithdrawn?: boolean;
 }) {
   const base = `/courses/${encodeURIComponent(offeringId)}`;
   const inLesson = historyContext === 'lesson';
+  const lessonOrigin = inLesson ? { includeWithdrawn: lessonIncludeWithdrawn } : undefined;
   const compact = historyContext === 'member' || historyContext === 'group';
 
   const records = notes.length ? <ul className={compact ? `${styles.recordList} ${styles.compactRecordList}` : styles.recordList}>{notes.map(note => {
@@ -42,15 +44,12 @@ export function TeachingRecordsList({
     const contextLabel = note.kind === 'LEAVE_CONFIRMED' ? '请假确认来源' : '情境或来源';
     const origin = new URLSearchParams();
     if ((groupMember || inLesson) && note.page) origin.set('fromPage', note.page.id);
-    if (inLesson) origin.set('fromLessonRecords', '1');
+    if (note.page) setLessonRecordOrigin(origin, lessonOrigin);
     if (note.contextGroup) origin.set('fromGroup', note.contextGroup.id);
     const memberHref = (inLesson || groupMember) && note.targetMember
       ? `${base}/members/${encodeURIComponent(note.targetMember.id)}?${origin}`
       : null;
-    const groupHref = (groupId: string) => {
-      const href = groupWorkHref(offeringId, note.page?.id, groupId);
-      return inLesson && href.includes('?') ? `${href}&fromLessonRecords=1` : href;
-    };
+    const groupHref = (groupId: string) => groupWorkHref(offeringId, note.page?.id, groupId, lessonOrigin);
     const versionParams = new URLSearchParams(inLesson ? { fromLessonRecords: '1' } : origin);
     if (!inLesson && note.targetGroup) versionParams.set('fromGroup', note.targetGroup.id);
     if (!inLesson && note.targetMember) versionParams.set('fromMember', note.targetMember.id);

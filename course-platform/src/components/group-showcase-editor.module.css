@@ -1,0 +1,81 @@
+.workspace {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+  width: 100%;
+  max-width: var(--course-prose-width);
+  margin-inline: auto;
+  overflow-wrap: anywhere;
+}
+
+.workspace > header {
+  display: grid;
+  gap: 4px;
+}
+
+.workspace > header h1 { margin-block: 0; }
+.meta { color: var(--muted); font-size: 14px; }
+.editor, .fields { display: grid; gap: 22px; min-width: 0; }
+.fields { padding: 0; margin: 0; border: 0; }
+.comparison {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+}
+.comparison h2, .fields > h2 { font-size: 19px; line-height: 1.4; }
+.comparison h3 { font-size: 16px; line-height: 1.45; }
+.comparison h2:focus { scroll-margin-block-start: 16px; }
+.comparison p, .comparison dl, .comparison dd { margin: 0; }
+.comparisonText { display: grid; gap: 8px; }
+.comparisonText dt { color: var(--muted); font-size: 14px; }
+.comparisonText dd, .comparisonCaption { white-space: pre-wrap; }
+.comparisonMaterials { display: grid; gap: 8px; margin: 0; padding-inline-start: 1.5em; }
+.confirmComparison { display: flex; align-items: baseline; gap: 8px; min-height: 44px; padding-block: 8px; cursor: pointer; }
+.picker, .chosen, .release { min-width: 0; display: grid; gap: 10px; }
+.picker h2, .chosen h2, .release h2 { font-size: 19px; line-height: 1.4; }
+.sourceKind, .releaseItem { border-top: 1px solid var(--line); }
+.sourceKind > p { padding-block: 4px 12px; }
+.sourceKind > summary, .releaseItem summary {
+  width: fit-content;
+  min-height: 44px;
+  padding-block: 10px;
+  cursor: pointer;
+  color: var(--accent);
+}
+.source, .releaseItem { display: grid; gap: 6px; padding-block: 12px 16px; }
+.source + .source { border-top: 1px solid var(--line); }
+.source h3, .selectionHeading h3, .releaseItem h3 { font-size: 16px; line-height: 1.45; }
+.source p, .releaseItem p, .controls p { margin: 0; }
+.source > a, .fileChoices a, .releaseItem a { width: fit-content; font-size: 14px; }
+.excerpt {
+  max-block-size: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  padding-inline-start: 12px;
+  border-inline-start: 2px solid var(--line);
+}
+.fileChoices, .chosen ol { list-style: none; padding: 0; margin: 0; }
+.fileChoices li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 12px; }
+.choice { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding-block: 6px; cursor: pointer; }
+.choice input { inline-size: 16px; block-size: 16px; flex-shrink: 0; }
+.chosen li { display: grid; gap: 8px; padding-block: 12px; border-top: 1px solid var(--line); }
+.selectionHeading, .controls { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+.selectionIdentity { min-width: 0; }
+.selectionActions { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.selectionHeading button {
+  min-height: 44px;
+  padding: 6px 2px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--accent);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.selectionHeading button:disabled { color: var(--muted); opacity: .55; cursor: default; }
+.previewTools { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
+.releaseItem details { width: 100%; }
+.releaseItem details form { padding-block: 2px 12px; }
+.reviewBack { width: fit-content; display: inline-flex; align-items: center; min-height: 44px; }

@@ -21,7 +21,7 @@ export type ResourcePreview =
 
 const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
-function inlineFile(name: string, bytes: Uint8Array) {
+export function inlineFile(name: string, bytes: Uint8Array) {
   if (downloadOnly.test(name)) return;
   const header = String.fromCharCode(...bytes.subarray(0, 16));
   if (/\.pdf$/i.test(name) && /^%PDF-\d\.\d/.test(header)) return { kind: 'pdf', contentType: 'application/pdf', extension: 'pdf' } as const;

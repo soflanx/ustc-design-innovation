@@ -1,0 +1,70 @@
+.story {
+  display: grid;
+  gap: clamp(24px, 5vw, 48px);
+  min-width: 0;
+  max-width: var(--course-prose-width, 880px);
+  margin-inline: auto;
+  overflow-wrap: anywhere;
+}
+
+.header, .body, .materials {
+  min-width: 0;
+  width: min(100%, 42rem);
+  margin-inline: auto;
+}
+
+.header h1 { font-size: clamp(2rem, 4.5vw, 3.15rem); font-weight: 600; line-height: 1.25; }
+.summary { margin-top: 16px; font-size: clamp(1rem, 2.5vw, 1.3rem); line-height: 1.65; white-space: pre-wrap; }
+.byline { margin-top: 16px; color: var(--muted); font-size: .875rem; }
+.cover { margin: 0; }
+.cover img, .materialImage { display: block; width: auto; height: auto; max-width: 100%; object-fit: contain; }
+.cover img { max-height: min(60vh, 36rem); margin-inline: auto; }
+.materialImage { max-height: 24rem; margin-top: 10px; }
+.body p, .materialText { white-space: pre-wrap; line-height: 1.85; }
+.body p + p { margin-top: 18px; }
+
+.materials, .listing { border-top: 1px solid var(--line); padding-top: 22px; }
+.materials h2, .listing h2 { font-size: 1.2rem; }
+.materials ul, .listing ul { list-style: none; padding: 0; margin: 12px 0 0; }
+.materials li { padding-block: 14px; }
+.materials li + li, .listing li + li { border-top: 1px solid var(--line); }
+.caption { font-weight: 550; white-space: pre-wrap; }
+.source { margin-top: 4px; color: var(--muted); font-size: .875rem; }
+.materialText { margin-top: 8px; }
+.file { display: inline-flex; align-items: center; min-height: 44px; max-width: 100%; font-size: .875rem; overflow-wrap: anywhere; }
+
+.listing {
+  max-width: var(--course-prose-width, 100%);
+  margin: clamp(28px, 5vw, 44px) auto 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.listLink {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  gap: 6px 24px;
+  align-items: baseline;
+  padding-block: 14px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.listLink:hover { text-decoration: none; }
+.listLink:hover h3 { text-decoration: underline; text-underline-offset: 4px; }
+.listLink h3 { font-size: 1.025rem; }
+.listLink p, .listLink span { color: var(--muted); font-size: .875rem; }
+.listLink p { margin-top: 4px; }
+
+.reading { display: grid; gap: 22px; min-width: 0; }
+.reading > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  width: fit-content;
+  color: var(--muted);
+  font-size: .875rem;
+}
+
+@media (max-width: 620px) {
+  .listLink { grid-template-columns: minmax(0, 1fr); }
+}

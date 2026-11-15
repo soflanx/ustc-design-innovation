@@ -2,8 +2,10 @@ import Link from 'next/link';
 import { PageShell } from '@/components/site-shell';
 import { PortalImage } from '@/components/portal-image';
 import { getCurrentUser } from '@/lib/auth';
-import { getPublicCourses, getPublicProjects } from '@/lib/queries';
-import { getCourseImage, getHomeImage, getPostImage } from '@/lib/editorial-images';
+import { getPublicCourses } from '@/lib/queries';
+import { listPublicShowcaseProjects } from '@/lib/group-showcase';
+import { showcaseReadHref } from '@/lib/group-showcase-contract';
+import { getCourseImage, getHomeImage } from '@/lib/editorial-images';
 import { courseKinds } from '@/lib/home-courses';
 import { partners, teachingTeam } from '@/lib/home-people';
 import styles from './portal-home.module.css';
@@ -13,7 +15,7 @@ export const dynamic = 'force-dynamic';
 const HOME_PROJECTS = 6;
 
 export default async function HomePage() {
-  const [user, courses, projects] = await Promise.all([getCurrentUser(), getPublicCourses(), getPublicProjects(HOME_PROJECTS)]);
+  const [user, courses, projects] = await Promise.all([getCurrentUser(), getPublicCourses(), listPublicShowcaseProjects(HOME_PROJECTS)]);
 
   return <PageShell currentUser={user}>
     <section className={styles.hero} aria-labelledby="home-title">
@@ -42,21 +44,21 @@ export default async function HomePage() {
       </div>
     </section>
 
-    {projects.length > 0 && <section className={`${styles.block} ${styles.band}`} aria-labelledby="projects-title">
+    <section className={`${styles.block} ${styles.band}`} aria-labelledby="projects-title">
       <div className={styles.blockHead}>
-        <h2 id="projects-title">往届项目</h2>
+        <h2 id="projects-title">课程项目</h2>
         <Link href="/projects">全部项目<span aria-hidden="true"> →</span></Link>
       </div>
-      <ul className={styles.projects}>
-        {projects.map(project => <li key={project.slug}>
-          <Link href={`/news/${project.slug}`}>
-            <PortalImage image={getPostImage(project.slug)} ratio="4 / 3"/>
+      {projects.length > 0 && <ul className={styles.projects}>
+        {projects.map(project => <li key={project.groupId}>
+          <Link href={`${showcaseReadHref(project.offeringId, project.groupId, 'PUBLIC')}?from=home`} prefetch={false}>
+            <PortalImage image={project.cover ?? undefined} ratio="4 / 3"/>
             <h3>{project.title}</h3>
-            <p>{[project.offering?.term.name, project.coverLabel].filter(Boolean).join(' · ')}</p>
+            <p>{project.term.name}</p>
           </Link>
         </li>)}
-      </ul>
-    </section>}
+      </ul>}
+    </section>
 
     <section className={styles.block} aria-labelledby="partners-title">
       <h2 id="partners-title">{teachingTeam.length ? '合作与团队' : '合作'}</h2>

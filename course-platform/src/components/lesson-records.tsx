@@ -51,7 +51,7 @@ export async function LessonRecords({ authorId, offeringId, pageId, includeWithd
         </div>
         <LegacyClassroomDrafts authorId={authorId} offeringId={offeringId} pageId={pageId} lessonTargets={lessonTargets}/>
         <TeachingRecordsList offeringId={offeringId} authorId={authorId} notes={notes}
-          historyContext="lesson" withdrawnHistoryHref={withdrawnHistoryHref}/>
+          historyContext="lesson" lessonIncludeWithdrawn={includeWithdrawn} withdrawnHistoryHref={withdrawnHistoryHref}/>
       </div>
     </TeachingRecordsNotice>
   </section>;

@@ -1,4 +1,4 @@
-type PortalImageData = { src: string; alt: string; width: number; height: number };
+type PortalImageData = { src: string; alt: string; width?: number; height?: number };
 
 /** A public-portal picture at a fixed ratio; a plain grey block stands in until a real image is bound. */
 export function PortalImage({ image, ratio, priority = false }: { image?: PortalImageData; ratio: string; priority?: boolean }) {
