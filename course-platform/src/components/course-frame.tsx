@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import type { CourseMember, Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
-import { groupWorkHref } from '@/lib/group-work-link';
-import { canManageOffering } from '@/lib/policy';
+import { groupWorkHref, type LessonRecordOrigin } from '@/lib/group-work-link';
+import { canManageOffering, isActiveTeachingMember } from '@/lib/policy';
 import { courseLabel, offeringCourseTitle } from '@/lib/course-label';
 import { PageShell, type SiteUser } from './site-shell';
 import { CourseNavigation, type CourseSection } from './course-navigation';
@@ -10,21 +10,22 @@ import styles from './course-frame.module.css';
 
 type Offering = Prisma.CourseOfferingGetPayload<{ include: { course: true; term: true } }>;
 
-export async function CourseFrame({ children, user, offering, membership, active, groupSourcePageId }: {
+export async function CourseFrame({ children, user, offering, membership, active, groupSourcePageId, groupSourceLessonRecords }: {
   children: ReactNode;
   user: SiteUser & { id: string; isAdmin: boolean };
   offering: Offering;
   membership: CourseMember | null;
   active: CourseSection;
   groupSourcePageId?: string;
+  groupSourceLessonRecords?: LessonRecordOrigin;
 }) {
   const student = !user.isAdmin && membership?.role === 'STUDENT';
-  const teachingMember = membership?.status === 'ACTIVE' && (membership.role === 'TEACHER' || membership.role === 'TA');
+  const teachingMember = isActiveTeachingMember(membership);
   const group = student && !groupSourcePageId ? await db.group.findFirst({
     where: { offeringId: offering.id, members: { some: { courseMemberId: membership.id, leftAt: null } } },
     select: { id: true },
   }) : null;
-  const groupHref = groupWorkHref(offering.id, groupSourcePageId, group?.id);
+  const groupHref = groupWorkHref(offering.id, groupSourcePageId, group?.id, groupSourceLessonRecords);
   const title = offeringCourseTitle(offering);
   return <PageShell currentUser={user} context="workspace" courseContext={{ label: courseLabel(offering.course, offering.term.name, offering.title), fullName: `${title} · ${offering.term.name}` }}>
     <div className={`container ${styles.frame}`} data-course-frame={active}>

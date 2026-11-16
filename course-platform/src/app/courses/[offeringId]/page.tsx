@@ -7,7 +7,9 @@ import { loginPath } from '@/lib/return-to';
 import { canManageOffering, canViewOffering, statusLabels, displayDate } from '@/lib/policy';
 import { PageShell } from '@/components/site-shell';
 import { CourseWorkspace } from '@/components/course-workspace';
+import { GroupShowcaseListing } from '@/components/group-showcase-story';
 import { offeringCourseTitle } from '@/lib/course-label';
+import { listPublishedGroupShowcases } from '@/lib/group-showcase';
 import { getPublicOfferingNews } from '@/lib/queries';
 import { getCourseKind } from '@/lib/home-courses';
 
@@ -26,7 +28,10 @@ export default async function OfferingPage({ params, searchParams }: {
     const initialIntent = create === 'assignment' ? 'create-assignment' : edit === '1' ? 'edit' : undefined;
     return <CourseWorkspace offering={offering} user={user} membership={membership} initialIntent={initialIntent}/>;
   }
-  const reports = await getPublicOfferingNews(offeringId);
+  const [reports, showcases] = await Promise.all([
+    getPublicOfferingNews(offeringId),
+    listPublishedGroupShowcases(offeringId, 'PUBLIC'),
+  ]);
   const generalDescription = offering.course.description.trim();
   const offeringDescription = offering.description.trim();
   const courseDescription = generalDescription || offeringDescription;
@@ -63,6 +68,7 @@ export default async function OfferingPage({ params, searchParams }: {
         </>}
       </aside>
     </div>
+      <GroupShowcaseListing offeringId={offeringId} scope="PUBLIC" showcases={showcases}/>
       {!!reports.length && <section id="course-reports" className={styles.offeringReports} aria-labelledby="course-reports-title">
         <h2 id="course-reports-title">{isArchived ? '该学期课程报道' : '本期课程报道'}</h2>
         <ul>{reports.map(report => <li key={report.slug}>

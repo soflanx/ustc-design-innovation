@@ -88,12 +88,13 @@ function checkPublicPage(html, path, entryLabel) {
 }
 
 async function checkPublicEntries(publicHome, studentCookie) {
-  const paths = ['/', '/stories', '/projects', '/news'];
-  const news = linksIn(publicHome).find(link => /^\/news\/[^/?#]+$/.test(link.href));
-  if (news) paths.push(news.href);
-  else skipped.push('首页无已发布课程新闻，未覆盖新闻详情的身份入口');
-  for (const path of paths) {
-    const guestContent = checkPublicPage(path === '/' ? publicHome : await page(path), path, '师生入口');
+  const newsIndex = await page('/news');
+  const paths = new Map([['/', publicHome], ['/stories', null], ['/projects', null], ['/news', newsIndex]]);
+  const news = linksIn(newsIndex).find(link => /^\/news\/[^/?#]+$/.test(link.href));
+  if (news) paths.set(news.href, null);
+  else skipped.push('新闻目录无已发布课程新闻，未覆盖新闻详情的身份入口');
+  for (const [path, cached] of paths) {
+    const guestContent = checkPublicPage(cached ?? await page(path), path, '师生入口');
     const studentContent = checkPublicPage(await page(path, studentCookie), path, '我的课程');
     const nextGuestContent = checkPublicPage(await page(path), path, '师生入口');
     assert.equal(studentContent, guestContent, `${path} 的学生应能阅读同一份公开正文`);
@@ -173,7 +174,7 @@ function assertCourseFrame(html, active, role, basePath = course) {
   const positions = [...html.matchAll(/<header\b[^>]*>([\s\S]*?)<\/header>/g)].map(([, body]) => textContent(body));
   const breadcrumbs = linksIn(html).filter(link => /\bclass="[^"]*\bbreadcrumb\b/.test(link.attributes));
   assert.ok([...positions, ...breadcrumbs.map(link => link.text)].every(text => !text.includes('设计创新思维 · ')), '页头与返回路径不应重复铺开完整课程定位');
-  const labels = { overview: '课程首页', lessons: '课次', members: '学生', assignments: '作业', resources: '课程资料', groups: role === 'STUDENT' ? '我的小组' : '小组', team: '教学团队', learning: '本学期记录', manage: '课程管理' };
+  const labels = { overview: '课程首页', lessons: '课次', members: '学生', assignments: '作业', resources: '课程资料', groups: role === 'STUDENT' ? '我的小组' : '小组', team: '教学团队', news: '课程新闻', learning: '本学期记录', manage: '课程管理' };
   const navigations = [...html.matchAll(/<nav\b[^>]*\baria-label="课程导航"[^>]*>([\s\S]*?)<\/nav>/g)];
   assert.ok(navigations.length, '应有统一课程导航');
   for (const [, navigation] of navigations) {
@@ -184,6 +185,7 @@ function assertCourseFrame(html, active, role, basePath = course) {
     assert.ok(links.some(link => link.text === labels[active] && /\baria-current="page"/.test(link.attributes)), '统一课程导航应指明当前位置');
     assert.equal(hasLink(navigation, `${basePath}/manage`), role === 'TEACHER' || role === 'ADMIN', '统一导航应保留课程管理权限边界');
     assert.equal(hasLink(navigation, `${basePath}/members`), role === 'TEACHER' || role === 'TA', '学生与纯管理员不应看到教学团队的学生目录');
+    assert.equal(hasLink(navigation, `${basePath}/news`), role === 'TEACHER' || role === 'TA', '课程新闻入口只供本期教学团队');
     assert.ok(!links.some(link => [`${basePath}/records`, `${basePath}/feedback`].includes(new URL(link.href, origin).pathname)), '课堂记录与旧指导页不应占据课程主导航');
   }
 }
@@ -465,6 +467,9 @@ async function assertNoInternalTeachingAccess(cookie) {
     assert.equal(denied.status, 404, '只有本期教学团队可以访问学习记录与内部课堂记录');
     assert.doesNotMatch(await denied.text(), /id="(?:lesson-records-title|member-search|record-[^"]+)"|aria-label="本期记录"/, '错误响应不能渲染内部记录或学生目录');
   }
+  for (const path of [`${course}/news`, `${course}/news/new`]) {
+    assert.equal((await get(path, cookie)).status, 404, '学生和未加入教学团队的管理员不能打开新闻编辑');
+  }
 }
 
 async function checkLessonDirectory(cookie, role, basePath = course) {
@@ -545,9 +550,11 @@ async function checkGroupPage(cookie, role, groupId, basePath = course) {
   }
   const teaching = role === 'TEACHER' || role === 'TA';
   assert.doesNotMatch(html, /id="(?:classroom-history|assignment-history|guidance-history)"/, '小组回顾使用一个阅读流，避免空栏目');
-  const records = html.match(/<ol\b[^>]*\baria-label="本期记录"[^>]*>/g) ?? [];
-  assert.ok(records.length <= Number(teaching), '小组本期记录只向本期教学团队呈现');
-  assert.equal([...html.matchAll(/<summary\b[^>]*>记一笔<\/summary>/g)].length, Number(teaching && basePath !== archivedCourse), '小组最多显示一个有权限的记事入口');
+  if (!teaching) {
+    assert.doesNotMatch(html, /aria-labelledby="teaching-(?:remarks|classroom|submissions)"|<li\b[^>]*\bid="record-[^"]+"/, '小组内部回顾只向本期教学团队呈现');
+  }
+  assert.doesNotMatch(html, /<summary\b[^>]*>记一笔<\/summary>/, '小组页不应显示课次的记事入口');
+  assert.equal([...html.matchAll(/<summary\b[^>]*>记小组备注<\/summary>/g)].length, Number(teaching && basePath !== archivedCourse), '教师与助教仅在可写课程看到一个小组备注入口');
   return html;
 }
 
@@ -650,6 +657,10 @@ try {
   assert.equal((await get(wrongTermMember, taCookie)).status, 404, '同一助教的两期课程也不能交叉读取学生记录');
   const taHome = await page(course, taCookie);
   assertCurrentTeaching(taHome, 'TA');
+  const courseNews = await page(`${course}/news`, taCookie);
+  assertCourseFrame(courseNews, 'news', 'TA');
+  assert.ok(hasLink(courseNews, `${course}/news/new`), '助教可从本期新闻列表新建草稿');
+  assert.equal((await get(`${archivedCourse}/news/new`, taCookie)).status, 404, '归档课程不开放新建新闻');
   assertCurrentTeaching(await page(archivedCourse, taCookie), 'TA', archivedCourse, true);
   const taAssignmentRows = [...taHome.matchAll(/<article\b[^>]*\bdata-assignment-scope="mine"[^>]*>([\s\S]*?)<\/article>/g)];
   assert.equal(taAssignmentRows.length, [...taHome.matchAll(/data-current-task=/g)].length, '助教的每项首页作业都应纳入引用入口核对');

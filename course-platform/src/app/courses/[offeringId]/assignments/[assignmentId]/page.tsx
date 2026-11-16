@@ -152,7 +152,7 @@ export default async function AssignmentPage({ params, searchParams }: {
         {offering.status !== 'ARCHIVED' && assignment.status === 'PUBLISHED' && assignment.mode === 'GROUP' && !data.currentGroup &&
           <p><Link href={`/courses/${encodeURIComponent(offeringId)}/groups`}>查看组队安排 →</Link></p>}
         {data.submissionContext && <SubmissionForm action={submitAssignmentAction.bind(null, offeringId, assignmentId, user.id)}
-          draftKey={`${user.id}:${offeringId}:${assignmentId}`} assignmentHref={base} requestId={randomUUID()}
+          draftKey={`${user.id}:${offeringId}:${assignmentId}`} expectedUserId={user.id} assignmentHref={base} requestId={randomUUID()}
           context={data.submissionContext} revisionSource={revisionSource} hasCurrentSubmission={Boolean(data.progress?.latestVersionId)}/>}
       </section>}
       {student ? <section className={styles.section}>

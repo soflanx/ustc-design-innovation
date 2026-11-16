@@ -21,7 +21,10 @@ export type SubmissionRequirements = {
 
 export type SubmissionAttachment = { id: string; name: string; size: number };
 export type SubmissionUpload = { name: string; bytes: Uint8Array };
+/** Inline uploads through a Server Action and small group-process attachments. */
 export const MAX_SUBMISSION_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_FORMAL_SUBMISSION_FILE_BYTES = 200 * 1024 * 1024;
+export const SUBMISSION_CHUNK_BYTES = 1024 * 1024;
 export const MAX_SUBMISSION_FILES = 20;
 
 /** Only populated when the current student is allowed to read that version. */
@@ -44,10 +47,14 @@ export type SubmissionContext = {
   correctionUntil?: string | null;
 };
 
+export type SubmissionBlockedContext = SubmissionContext & { canSubmit: false; blockedReason: string };
+
 export type SubmissionConflictReason = 'requirements' | 'latest_submission' | 'group';
 
 export type SubmissionFormState = FormState & {
   identityBlocked?: true;
+  resetUpload?: true;
+  blocked?: SubmissionBlockedContext;
   conflict?: {
     reasons: SubmissionConflictReason[];
     context: SubmissionContext;
@@ -67,5 +74,6 @@ export type SubmissionInput = {
   expectedLatestSubmissionToken: string;
   expectedGroupId: string | null;
   uploads?: SubmissionUpload[];
+  stagedFileIds?: string[];
   retainedFileIds?: string[];
 };

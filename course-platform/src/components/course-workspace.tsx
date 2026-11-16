@@ -7,8 +7,10 @@ import { courseSubpageReference } from '@/lib/course-document-view';
 import { formatTeachingDate } from '@/lib/teaching-format';
 import { getGroupFormationWindow } from '@/lib/group-formation';
 import { offeringCourseTitle } from '@/lib/course-label';
+import { listPublishedGroupShowcases } from '@/lib/group-showcase';
 import { CourseFrame } from './course-frame';
 import { CourseAuthoredPage } from './course-authored-page';
+import { GroupShowcaseListing } from './group-showcase-story';
 import type { CourseEditorIntent } from './course-focus-editor';
 import type { SiteUser } from './site-shell';
 import styles from './current-teaching.module.css';
@@ -23,10 +25,11 @@ export async function CourseWorkspace({ offering, user, membership, initialInten
 }) {
   const student = !user.isAdmin && membership?.role === 'STUDENT';
   const archived = offering.status === 'ARCHIVED';
-  const [{ catalog: records, teaching }, focusData, pageIndex] = await Promise.all([
+  const [{ catalog: records, teaching }, focusData, pageIndex, showcases] = await Promise.all([
     loadCoursePageCatalog(user, offering, membership),
     getCourseFocus(user.id, offering.id),
     listCourseSubpages(user.id, offering.id),
+    listPublishedGroupShowcases(offering.id, 'CLASS', user.id),
   ]);
   const catalog = { ...records, pages: pageIndex.pages.map(page => courseSubpageReference(offering.id, page)) };
   const { focus, canEdit } = focusData;
@@ -49,5 +52,6 @@ export async function CourseWorkspace({ offering, user, membership, initialInten
         {receipt && <Link href={`${base}/assignments/${encodeURIComponent(receipt.id)}/submissions/${encodeURIComponent(receipt.version.id)}?fromHome=1`}>最近成果 · {receipt.title} →</Link>}
       </div>}
     </div>
+    <GroupShowcaseListing offeringId={offering.id} scope="CLASS" showcases={showcases}/>
   </div></CourseFrame>;
 }

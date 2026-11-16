@@ -1,10 +1,11 @@
 'use client';
 
-import { useActionState, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useActionState, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { MAX_SUBMISSION_FILES, MAX_SUBMISSION_FILE_BYTES, type SubmissionContext, type SubmissionFormState } from '@/lib/submission-contract';
-import { confirmSubmissionDraft, draftAfterRejectedSubmission, editSubmissionDraft, newSubmissionDraft, restoreSubmissionDraft, revisionDraftAction, submissionReviewReasons, type SubmissionDraft } from '@/lib/submission-draft';
+import { MAX_FORMAL_SUBMISSION_FILE_BYTES, MAX_SUBMISSION_FILES, MAX_SUBMISSION_FILE_BYTES, type SubmissionContext, type SubmissionFormState } from '@/lib/submission-contract';
+import { stageSubmissionFiles, SubmissionChunkError, SubmissionUploadReleases, uploadReleaseFailed, type ChosenSubmissionFile, type SubmissionUploadProgress } from '@/lib/submission-chunk-client';
+import { confirmSubmissionDraft, draftAfterRejectedSubmission, editSubmissionDraft, newSubmissionDraft, restoreSubmissionDraft, revisionDraftAction, submissionReviewReasons, writeStoredSubmissionDraft, type SubmissionDraft } from '@/lib/submission-draft';
 import { formatTeachingDate } from '@/lib/teaching-format';
 import teachingStyles from '@/app/teaching.module.css';
 import styles from './submission-form.module.css';
@@ -14,18 +15,26 @@ type Props = {
   action: (state: SubmissionFormState, form: FormData) => Promise<SubmissionFormState>;
   draftKey: string;
   assignmentHref: string;
+  expectedUserId: string;
   requestId: string;
   context: SubmissionContext;
   hasCurrentSubmission: boolean;
   revisionSource?: { versionId: string; feedback: { id: string; author: string; body: string }[] };
 };
 
+function chosenUploads(files: ChosenSubmissionFile[], progress: SubmissionUploadProgress) {
+  return files.flatMap(choice => {
+    const upload = progress.get(choice);
+    return upload ? [upload] : [];
+  });
+}
+
 // A changed account/task remounts the editor before any previous draft can appear.
 export function SubmissionForm(props: Props) {
   return <DraftEditor key={props.draftKey} {...props}/>;
 }
 
-function DraftEditor({ action, draftKey, assignmentHref, requestId, context, hasCurrentSubmission, revisionSource }: Props) {
+function DraftEditor({ action, draftKey, assignmentHref, expectedUserId, requestId, context, hasCurrentSubmission, revisionSource }: Props) {
   const router = useRouter();
   const fieldId = useId();
   const storageKey = `design-course:submission:${draftKey}`;
@@ -37,13 +46,19 @@ function DraftEditor({ action, draftKey, assignmentHref, requestId, context, has
   const [storageFailed, setStorageFailed] = useState(false);
   const [revisionHost, setRevisionHost] = useState<HTMLElement | null>(null);
   const [openRevision, setOpenRevision] = useState(0);
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<ChosenSubmissionFile[]>([]);
   const [fileError, setFileError] = useState('');
+  const [uploadProgress, setUploadProgress] = useState<{ received: number; total: number } | null>(null);
+  const [releaseError, setReleaseError] = useState('');
+  const [releasingDraftUploads, setReleasingDraftUploads] = useState(false);
+  const [uploadReleases] = useState(() => new SubmissionUploadReleases(assignmentHref, expectedUserId));
+  const fileUploads = useRef<SubmissionUploadProgress>(new WeakMap());
   const restoredDraft = useRef(false);
   const current = useRef(draft);
   const currentContext = useRef(context);
   const previousPageContext = useRef(context);
   const canPersist = useRef(false);
+  const storageSnapshot = useRef<string | null>(null);
   const sending = useRef(false);
   const ownReceipt = useRef<string | null>(null);
   const submittedFrom = useRef<string | null>(null);
@@ -53,6 +68,29 @@ function DraftEditor({ action, draftKey, assignmentHref, requestId, context, has
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const processed = useRef<SubmissionFormState | null>(null);
   const sourceId = revisionSource?.versionId;
+
+  const flushUploadReleases = useCallback(async () => {
+    try {
+      await uploadReleases.flush();
+      setReleaseError('');
+      return null;
+    } catch (error) {
+      const failure = error instanceof SubmissionChunkError ? error : new SubmissionChunkError(uploadReleaseFailed, false);
+      setReleaseError(failure.message);
+      return failure;
+    }
+  }, [uploadReleases]);
+
+  useEffect(() => {
+    const retry = () => { void flushUploadReleases(); };
+    retry();
+    window.addEventListener('online', retry);
+    window.addEventListener('focus', retry);
+    return () => {
+      window.removeEventListener('online', retry);
+      window.removeEventListener('focus', retry);
+    };
+  }, [flushUploadReleases]);
 
   useEffect(() => {
     setRevisionHost(sourceId ? document.getElementById(`revise-from-${sourceId}`) : null);
@@ -71,24 +109,52 @@ function DraftEditor({ action, draftKey, assignmentHref, requestId, context, has
     setDraft(next);
   }
 
-  function persist(value: SubmissionDraft, basedOnVersion?: number) {
-    // Opening or leaving a page must not erase an unreadable stored draft.
+  const persist = useCallback((value: SubmissionDraft, basedOnVersion?: number) => {
+    clearTimeout(saveTimer.current);
+    saveTimer.current = undefined;
     if (!canPersist.current) return;
     try {
-      if (value.body || value.pendingAttempt || value.uploadNames?.length || value.retainedFileIds) localStorage.setItem(storageKey, JSON.stringify(value));
-      else localStorage.removeItem(storageKey);
+      const saved = writeStoredSubmissionDraft(localStorage, storageKey, storageSnapshot.current, value);
+      if (saved === undefined) {
+        setStorageFailed(true);
+        setStorageStatus('另一标签页已更改本浏览器中的草稿。本页输入尚未保存，可先复制正文。');
+        return;
+      }
+      storageSnapshot.current = saved;
       setStorageFailed(false);
       setStorageStatus(basedOnVersion ? `已用第 ${basedOnVersion} 版原文起草，已保存在本浏览器，尚未提交。`
         : value.pendingAttempt ? '提交结果尚待确认，正文已保存在本浏览器。' : value.body ? '草稿已保存在本浏览器，尚未提交。' : '正文会自动保存在本浏览器，尚未提交。');
+      return saved;
     } catch {
       setStorageFailed(true);
       setStorageStatus('未能保存本地草稿。输入仍在当前页面，请勿刷新或关闭，可先复制正文。');
     }
+  }, [storageKey]);
+
+  const flushDraft = useCallback(() => {
+    if (saveTimer.current !== undefined) persist(current.current);
+  }, [persist]);
+
+  function queueUploadReleases(ids: string[]) {
+    if (!ids.length) return false;
+    let saved: string | null;
+    try { saved = localStorage.getItem(storageKey); }
+    catch { saved = null; }
+    if (saved !== null && saved !== storageSnapshot.current) {
+      try {
+        const other = restoreSubmissionDraft(saved, requestId);
+        const inUse = new Set(other.stagedFileIds ?? other.uploadingFileIds);
+        ids = ids.filter(id => !inUse.has(id));
+      } catch { return false; }
+    }
+    uploadReleases.add(ids);
+    return ids.length > 0;
   }
 
   useEffect(() => {
     try {
       const saved = localStorage.getItem(storageKey);
+      storageSnapshot.current = saved;
       if (saved) {
         const restored = restoreSubmissionDraft(saved, requestId);
         updateDraft(restored);
@@ -121,82 +187,118 @@ function DraftEditor({ action, draftKey, assignmentHref, requestId, context, has
   }, [context]);
 
   useEffect(() => {
-    function flush() {
-      if (!ready) return;
-      clearTimeout(saveTimer.current);
-      persist(current.current);
-    }
-    function onVisibility() { if (document.visibilityState === 'hidden') flush(); }
-    window.addEventListener('pagehide', flush);
+    if (!ready) return;
+    function onVisibility() { if (document.visibilityState === 'hidden') flushDraft(); }
+    window.addEventListener('pagehide', flushDraft);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('pagehide', flushDraft);
       document.removeEventListener('visibilitychange', onVisibility);
-      clearTimeout(saveTimer.current);
       // Also flush when Next navigates without a full page unload.
-      if (ready && canPersist.current) {
-        try {
-          if (current.current.body || current.current.pendingAttempt || current.current.uploadNames?.length || current.current.retainedFileIds) localStorage.setItem(storageKey, JSON.stringify(current.current));
-          else localStorage.removeItem(storageKey);
-        } catch { /* The visible save status describes storage failures. */ }
-      }
+      flushDraft();
     };
-    // The keyed editor owns one stable storage key.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
+  }, [ready, flushDraft]);
 
   const [state, formAction, pending] = useActionState(async (previous: SubmissionFormState, form: FormData): Promise<SubmissionFormState> => {
-    clearTimeout(saveTimer.current);
+    flushDraft();
     const value = current.current;
+    const submission = currentContext.current;
     // Retry the original operation first: the server returns a matching saved
     // version before checking later requirements, group changes, or deadlines.
-    if (!value.pendingAttempt && submissionReviewReasons(value, currentContext.current).length) {
+    if (!value.pendingAttempt && submissionReviewReasons(value, submission).length) {
       sending.current = false;
       return { error: '请先核对当前要求与提交归属；正文已保留。' };
     }
-    if (!value.pendingAttempt && !currentContext.current.canSubmit) {
+    if (!value.pendingAttempt && !submission.canSubmit) {
       sending.current = false;
-      return { error: currentContext.current.blockedReason || '当前不可提交，正文已保留。' };
+      return { error: submission.blockedReason || '当前不可提交，正文已保留。' };
     }
     // Send the form snapshot captured by this click, not newer mutable state.
-    const retainedFileIds = value.retainedFileIds ?? currentContext.current.latestSubmission?.attachments?.map(file => file.id) ?? [];
-    if (value.uploadNames?.length && files.length !== value.uploadNames.length) {
+    const retainedFileIds = value.retainedFileIds ?? submission.latestSubmission?.attachments?.map(file => file.id) ?? [];
+    if (!value.stagedFileIds?.length && value.uploadNames?.length && files.length !== value.uploadNames.length) {
       sending.current = false;
       return { error: '请重新选择草稿中的附件，再继续提交。' };
     }
-    if (!value.body.trim() && !files.length && !retainedFileIds.length) {
+    if (!value.body.trim() && !files.length && !retainedFileIds.length && !value.stagedFileIds?.length) {
       sending.current = false;
       return { error: '请填写说明或添加至少一个附件。' };
     }
-    for (const file of files) form.append('attachments', file);
-    for (const id of retainedFileIds) form.append('retainedFileIds', id);
-    const retainedFromVersionId = value.pendingAttempt ? value.retainedFromVersionId : currentContext.current.latestSubmission?.id;
-    const attempt = { ...value, retainedFileIds, retainedFromVersionId, pendingAttempt: true };
-    updateDraft(attempt);
-    persist(attempt);
+    const uploadSize = files.reduce((total, { file }) => total + file.size, 0);
+    const keptSize = submission.latestSubmission?.attachments
+      ?.filter(file => retainedFileIds.includes(file.id)).reduce((total, file) => total + file.size, 0) ?? 0;
+    if (!value.pendingAttempt && uploadSize + keptSize > MAX_FORMAL_SUBMISSION_FILE_BYTES) {
+      sending.current = false;
+      return { error: '保留和新增附件合计不能超过 200 MiB。请移除部分附件后再提交。' };
+    }
     try {
+      let stagedFileIds = value.stagedFileIds;
+      const uploads = chosenUploads(files, fileUploads.current);
+      if (!stagedFileIds && (uploadSize > MAX_SUBMISSION_FILE_BYTES || uploads.length)) {
+        queueUploadReleases(uploads.filter(upload => upload.unavailable).map(upload => upload.id));
+        const releaseFailure = await flushUploadReleases();
+        if (releaseFailure?.identityBlocked) return { identityBlocked: true };
+        for (const choice of files) {
+          if (fileUploads.current.get(choice)?.unavailable) fileUploads.current.delete(choice);
+        }
+        try {
+          stagedFileIds = await stageSubmissionFiles(assignmentHref, expectedUserId, files, fileUploads.current,
+            received => setUploadProgress({ received, total: uploadSize }), () => {
+              const ids = chosenUploads(files, fileUploads.current).map(upload => upload.id);
+              const uploading = { ...current.current, uploadingFileIds: ids.length ? ids : undefined };
+              updateDraft(uploading);
+              persist(uploading);
+            });
+        } catch (error) {
+          if (error instanceof SubmissionChunkError) {
+            return { error: error.message, ...(error.identityBlocked ? { identityBlocked: true } : {}) };
+          }
+          return { error: '附件上传中断，正文和所选文件已保留。重新提交可从已上传的位置继续。' };
+        } finally {
+          setUploadProgress(null);
+        }
+      }
+      if (stagedFileIds) {
+        for (const id of stagedFileIds) form.append('stagedFileIds', id);
+      } else {
+        for (const { file } of files) form.append('attachments', file);
+      }
+      for (const id of retainedFileIds) form.append('retainedFileIds', id);
+      const retainedFromVersionId = value.pendingAttempt ? value.retainedFromVersionId : submission.latestSubmission?.id;
+      const attempt = { ...value, retainedFileIds, retainedFromVersionId, stagedFileIds, uploadingFileIds: undefined, pendingAttempt: true };
+      updateDraft(attempt);
+      const attemptSnapshot = persist(attempt);
       const result = await action(previous, form);
       if (result.success) {
         ownReceipt.current = result.receipt?.id ?? null;
-        submittedFrom.current = currentContext.current.latestSubmission?.id ?? null;
+        submittedFrom.current = submission.latestSubmission?.id ?? null;
         updateDraft(newSubmissionDraft(crypto.randomUUID(), currentContext.current));
         setAcknowledged(null);
+        fileUploads.current = new WeakMap();
         setFiles([]); setFileError(''); restoredDraft.current = false;
         try {
-          localStorage.removeItem(storageKey);
+          const cleared = typeof attemptSnapshot === 'string'
+            && writeStoredSubmissionDraft(localStorage, storageKey, attemptSnapshot, null) !== undefined;
+          if (cleared) storageSnapshot.current = null;
           setStorageFailed(false);
-          setStorageStatus('提交已成功，本浏览器草稿已清除。');
+          setStorageStatus(cleared ? '提交已成功，本浏览器草稿已清除。' : '提交已成功。');
         } catch {
           setStorageFailed(true);
           setStorageStatus('提交已成功，但未能清除本浏览器草稿。再次打开时请核对提交记录，避免重复提交。');
         }
-      } else if (result.identityBlocked || result.conflict) {
-        const retained = draftAfterRejectedSubmission({ ...value, retainedFileIds, retainedFromVersionId }, result.identityBlocked ? 'identityBlocked' : 'conflict');
+      } else if (result.resetUpload) {
+        for (const upload of chosenUploads(files, fileUploads.current)) upload.unavailable = true;
+        const retry = { ...attempt, stagedFileIds: undefined, uploadingFileIds: stagedFileIds, pendingAttempt: false };
+        updateDraft(retry);
+        persist(retry);
+      } else if (result.identityBlocked || result.conflict || result.blocked) {
+        const retained = result.blocked ? { ...attempt, pendingAttempt: false }
+          : draftAfterRejectedSubmission({ ...attempt, pendingAttempt: value.pendingAttempt }, result.identityBlocked ? 'identityBlocked' : 'conflict');
         updateDraft(retained);
         persist(retained);
-        if (result.conflict) {
-          currentContext.current = result.conflict.context;
-          setVisibleContext(result.conflict.context);
+        const freshContext = result.blocked ?? result.conflict?.context;
+        if (freshContext) {
+          currentContext.current = freshContext;
+          setVisibleContext(freshContext);
           setAcknowledged(null);
         }
       }
@@ -223,7 +325,9 @@ function DraftEditor({ action, draftKey, assignmentHref, requestId, context, has
   const latest = visibleContext.latestSubmission;
   const existingFiles = latest?.attachments ?? [];
   const retainedFileIds = draft.retainedFileIds ?? existingFiles.map(file => file.id);
-  const needsFilesAgain = !!draft.uploadNames?.length && !files.length;
+  const needsFilesAgain = !!draft.uploadNames?.length && !files.length && !draft.stagedFileIds?.length;
+  const hasRestoredUploads = !!draft.stagedFileIds?.length && !files.length;
+  const hasStagedUploads = !!(draft.stagedFileIds?.length || draft.uploadingFileIds?.length);
   const groupName = visibleContext.groupName;
   const hasGroupChange = reasons.includes('group') || (reasons.includes('unconfirmed') && draft.expectedGroupId !== visibleContext.confirmation.groupId);
   const blocked = !visibleContext.canSubmit;
@@ -249,12 +353,15 @@ function DraftEditor({ action, draftKey, assignmentHref, requestId, context, has
     const next = revisionDraftAction(value, live, source.versionId, !storageFailed && canPersist.current);
     if (!next || !live.latestSubmission) return;
     if (next === 'seed') {
+      flushDraft();
       // Another tab may have saved a draft since this feedback page was opened.
       try {
         const saved = localStorage.getItem(storageKey);
+        storageSnapshot.current = saved;
         if (saved !== null) {
           const restored = restoreSubmissionDraft(saved, requestId);
           updateDraft(restored);
+          restoredDraft.current = true;
           setStorageStatus(restored.pendingAttempt ? '已恢复上次待确认的提交，正文保留在本浏览器。' : '已恢复本浏览器中的草稿，尚未提交。');
         } else {
           const seeded = editSubmissionDraft(value, live.latestSubmission.body, crypto.randomUUID());
@@ -270,36 +377,69 @@ function DraftEditor({ action, draftKey, assignmentHref, requestId, context, has
     setOpenRevision(count => count + 1);
   }
 
-  function changeFiles(next: File[]) {
-    const size = next.reduce((total, file) => total + file.size, 0)
+  function changeFiles(next: ChosenSubmissionFile[]) {
+    if (sending.current) return;
+    const value = current.current;
+    const releasingReadOnly = blocked && !next.length;
+    if (releasingReadOnly && (value.pendingAttempt || state.identityBlocked || releasingDraftUploads)) return;
+    const size = next.reduce((total, { file }) => total + file.size, 0)
       + existingFiles.filter(file => retainedFileIds.includes(file.id)).reduce((total, file) => total + file.size, 0);
-    if (next.length + retainedFileIds.length > MAX_SUBMISSION_FILES || size > MAX_SUBMISSION_FILE_BYTES || next.some(file => !file.size)) {
-      setFileError('附件最多 20 个，合计不能超过 10 MiB，请选择非空文件。');
+    if (next.length + retainedFileIds.length > MAX_SUBMISSION_FILES || size > MAX_FORMAL_SUBMISSION_FILE_BYTES || next.some(({ file }) => !file.size || file.name.length > 255)) {
+      setFileError('附件最多 20 个，合计不能超过 200 MiB。请选择非空文件，文件名不能超过 255 个字符。');
       return;
     }
-    const names = next.map(file => file.name);
-    const restoringOriginalFiles = needsFilesAgain && JSON.stringify(names) === JSON.stringify(draft.uploadNames);
-    if (needsFilesAgain && draft.pendingAttempt && !restoringOriginalFiles && next.length) {
+    const names = next.map(({ file }) => file.name);
+    const restoring = needsFilesAgain || hasRestoredUploads;
+    const restoringOriginalFiles = needsFilesAgain && value.pendingAttempt && JSON.stringify(names) === JSON.stringify(value.uploadNames);
+    if (restoring && value.pendingAttempt && !restoringOriginalFiles && next.length) {
       setFileError('请按原顺序重新选择同名文件以核对上次提交，或先清除选件再开始新的更正。');
       return;
     }
-    setFiles(next); setFileError('');
-    const edited = { ...current.current, uploadNames: names,
-      ...(!restoringOriginalFiles ? { requestId: crypto.randomUUID(), pendingAttempt: false } : {}) };
-    updateDraft(edited); persist(edited);
+    const nextIds = chosenUploads(next, fileUploads.current).map(upload => upload.id);
+    const removed = restoringOriginalFiles ? [] : (value.stagedFileIds ?? value.uploadingFileIds ?? []).filter(id => !nextIds.includes(id));
+    const allStaged = next.length && next.every(choice => {
+      const upload = fileUploads.current.get(choice);
+      return upload && !upload.unavailable && upload.receivedBytes === choice.file.size;
+    });
+    const continuingIds = restoringOriginalFiles ? value.uploadingFileIds : nextIds;
+    const edited = { ...value, uploadNames: names, stagedFileIds: allStaged ? nextIds : undefined,
+      uploadingFileIds: !allStaged && continuingIds?.length ? continuingIds : undefined,
+      ...(!restoringOriginalFiles && !releasingReadOnly ? { requestId: crypto.randomUUID(), pendingAttempt: false } : {}) };
+    function applySelection() {
+      setFiles(next); setFileError('');
+      updateDraft(edited); persist(edited);
+    }
+    if (releasingReadOnly) {
+      if (!queueUploadReleases(removed)) {
+        setFileError('本浏览器中的草稿已变更，请重新打开作业后再释放附件。');
+        return;
+      }
+      setReleasingDraftUploads(true);
+      void flushUploadReleases().then(failure => {
+        setReleasingDraftUploads(false);
+        if (!failure?.identityBlocked && current.current === value) applySelection();
+      });
+      return;
+    }
+    applySelection();
+    if (queueUploadReleases(removed)) void flushUploadReleases();
   }
 
   function setRetained(next: string[]) {
-    const edited = { ...current.current, retainedFileIds: next, retainedFromVersionId: latest?.id, requestId: crypto.randomUUID(), pendingAttempt: false };
+    if (sending.current) return;
+    const value = current.current;
+    const edited = { ...value, retainedFileIds: next, retainedFromVersionId: latest?.id, requestId: crypto.randomUUID(), pendingAttempt: false };
     updateDraft(edited); persist(edited);
   }
 
   function seedCorrection() {
-    if (!ready || !context.canSubmit || blocked || state.identityBlocked || !latest || restoredDraft.current
+    if (!ready || sending.current || !context.canSubmit || blocked || state.identityBlocked || !latest || restoredDraft.current
       || draft.body || draft.pendingAttempt || needsReview || draft.retainedFileIds || draft.uploadNames?.length) return;
     restoredDraft.current = true;
     const seeded = editSubmissionDraft(draft, latest.body, crypto.randomUUID());
+    if (seeded === draft) return;
     updateDraft(seeded);
+    persist(seeded, latest.version);
   }
 
   const form = <form action={formAction} className={styles.form} aria-busy={pending} onSubmit={event => {
@@ -344,7 +484,7 @@ function DraftEditor({ action, draftKey, assignmentHref, requestId, context, has
       </div>}
       {blocked ? <p className={styles.blockedReason} role="status">{visibleContext.blockedReason || '当前不可提交。'}正文仍保留在本浏览器。</p>
         : <button type="button" className="button secondary" disabled={pending || draft.pendingAttempt} onClick={() => {
-          clearTimeout(saveTimer.current);
+          if (sending.current) return;
           const confirmed = confirmSubmissionDraft(current.current, visibleContext);
           updateDraft(confirmed);
           persist(confirmed);
@@ -354,14 +494,14 @@ function DraftEditor({ action, draftKey, assignmentHref, requestId, context, has
     {visibleContext.correctionUntil && !blocked && <p className="field-help">教学团队已为此成果开放更正至 {formatTeachingDate(visibleContext.correctionUntil)}。</p>}
     {ready && blocked && !needsReview && <p className={styles.blockedReason} role="status">{visibleContext.blockedReason || '当前不可提交。'}正文已保留，可以查看或复制。</p>}
     {ready && !needsReview && acknowledged === JSON.stringify(draft.confirmation) && <p className={styles.confirmedStatus} role="status">已核对当前要求第 {draft.confirmation?.assignmentRevision} 版{groupName ? `，本次代表${groupName}` : ''}。正文尚未提交。</p>}
-    {draft.pendingAttempt && !pending && <p className={styles.retryNotice}>上次提交未完成或结果尚未确认。请先重试；如果已经保存，会返回原回执。修改正文将开始一次新的提交。</p>}
+    {draft.pendingAttempt && !pending && <p className={styles.retryNotice}>上次提交未完成或结果尚未确认。请先重试；如果已经保存，会返回原回执。{!blocked && '修改正文将开始一次新的提交。'}</p>}
     {source && source.feedback.length > 0 && latest && !needsReview && <details key={source.versionId} className={styles.revisionFeedback}>
       <summary>对照第 {latest.version} 版的反馈（{source.feedback.length}）</summary>
       {source.feedback.map(note => <div key={note.id}><strong>{note.author}</strong><p><SubmissionText text={note.body}/></p></div>)}
     </details>}
     <div className="form-field"><label htmlFor={fieldId}>提交说明（选填）</label><textarea ref={bodyField} id={fieldId} name="body" value={draft.body} onChange={event => {
       const next = event.target.value;
-      if (next === current.current.body) return;
+      if (sending.current || next === current.current.body) return;
       canPersist.current = true;
       updateDraft(editSubmissionDraft(current.current, next, crypto.randomUUID()));
       ownReceipt.current = null;
@@ -385,21 +525,37 @@ function DraftEditor({ action, draftKey, assignmentHref, requestId, context, has
           保留 {file.name}
         </label>;
       })}
-      <input id={`${fieldId}-files`} type="file" multiple disabled={pending || !ready || (blocked && !draft.pendingAttempt)} onChange={event => {
-        const next = Array.from(event.target.files ?? []);
-        if (next.length) changeFiles(needsFilesAgain ? next : [...files, ...next]);
+      <input id={`${fieldId}-files`} type="file" multiple disabled={pending || !ready || (blocked && !draft.pendingAttempt) || (hasRestoredUploads && draft.pendingAttempt)} onChange={event => {
+        const next = Array.from(event.target.files ?? [], file => ({ file }));
+        if (next.length) changeFiles(needsFilesAgain || hasRestoredUploads ? next : [...files, ...next]);
         event.target.value = '';
       }}/>
-      {files.length > 0 && <ul>{files.map((file, index) => <li key={`${index}-${file.name}`}>{file.name} · <button type="button" className="link-button" disabled={pending || blocked} onClick={() => changeFiles(files.filter((_, item) => item !== index))}>移除</button></li>)}</ul>}
-      {needsFilesAgain && <p className="field-help">请重新选择 {draft.uploadNames?.join('、')}。刷新后不会保留文件本身。 <button type="button" className="link-button" disabled={pending || blocked} onClick={() => changeFiles([])}>清除选件</button></p>}
+      {files.length > 0 && <ul>{files.map(({ file }, index) => <li key={`${index}-${file.name}`}>{file.name}
+        {!blocked && <> · <button type="button" className="link-button" disabled={pending} onClick={() => changeFiles(files.filter((_, item) => item !== index))}>移除</button></>}
+      </li>)}</ul>}
+      {hasRestoredUploads && <p className="field-help">已上传 {draft.uploadNames?.join('、')}。{draft.pendingAttempt && '请直接重试本次提交。'}
+        {!blocked && <> <button type="button" className="link-button" disabled={pending} onClick={() => changeFiles([])}>{draft.pendingAttempt ? '清除选件，开始新提交' : '清除选件'}</button></>}
+      </p>}
+      {needsFilesAgain && <p className="field-help">{blocked && !draft.pendingAttempt ? `上次选取的附件：${draft.uploadNames?.join('、')}。`
+        : `请重新选择 ${draft.uploadNames?.join('、')} 后继续。`}
+        {!blocked && <> <button type="button" className="link-button" disabled={pending} onClick={() => changeFiles([])}>清除选件</button></>}
+      </p>}
+      {blocked && hasStagedUploads && !draft.pendingAttempt && <p><button type="button" className="button secondary"
+        disabled={pending || state.identityBlocked || releasingDraftUploads} onClick={() => changeFiles([])}>
+        {releasingDraftUploads ? '正在释放附件…' : '释放未提交附件'}
+      </button></p>}
       {fileError && <p className="notice error" role="alert">{fileError}</p>}
-      <p className="field-help">至少填写说明或添加一个附件。附件合计最多 10 MiB。浏览器草稿只保存文字及选件记录。</p>
+      {releaseError && <p className="field-help" role="status">{releaseError}{' '}
+        <button type="button" className="link-button" disabled={pending} onClick={() => { void flushUploadReleases(); }}>重试清理</button></p>}
+      <p className="field-help">至少填写说明或添加一个附件。保留和新增附件最多 20 个，合计不超过 200 MiB。</p>
+      {uploadProgress && <p className="field-help">正在上传附件 · {Math.floor(uploadProgress.received / uploadProgress.total * 100)}%{' '}
+        <progress aria-label="附件上传进度" value={uploadProgress.received} max={uploadProgress.total}/></p>}
     </div>
     {latest && <p className="field-help">更正后会更新当前正式成果，原有成果与反馈仍可从更正历史查看。</p>}</div>
-    {state.error && !state.conflict && <div><p className="notice error" role="alert">{state.error}</p>
+    {state.error && !state.conflict && !state.blocked && <div><p className="notice error" role="alert">{state.error}</p>
       {!state.identityBlocked && <p className="field-help">正文已保留。若刚才网络中断，请先重试或查看提交记录。</p>}
     </div>}
-    <div><button type="submit" className="button primary" disabled={pending || !ready || needsFilesAgain || (!draft.pendingAttempt && (needsReview || blocked))}>{pending ? '正在提交…' : draft.pendingAttempt ? '重试本次提交' : latest ? '确认更正' : '确认提交'}</button></div>
+    {(!blocked || draft.pendingAttempt) && <div><button type="submit" className="button primary" disabled={pending || !ready || needsFilesAgain || (!draft.pendingAttempt && needsReview)}>{uploadProgress ? '正在上传…' : pending ? '正在提交…' : draft.pendingAttempt ? '重试本次提交' : latest ? '确认更正' : '确认提交'}</button></div>}
   </form>;
 
   return <>
@@ -417,7 +573,7 @@ function DraftEditor({ action, draftKey, assignmentHref, requestId, context, has
     <details ref={editor} className={teachingStyles.submissionEditor} open={context.requirements.status !== 'CANCELLED' && !hasCurrentSubmission &&
       (context.requirements.mode !== 'GROUP' || context.confirmation.groupId !== null || Boolean(draft.pendingAttempt))}
       onToggle={event => { if (event.currentTarget.open && hasCurrentSubmission) seedCorrection(); }}>
-      <summary>{!context.canSubmit ? '查看本浏览器草稿' : hasCurrentSubmission ? '更正正式成果' : '提交作业'}</summary>
+      <summary>{blocked ? '查看本浏览器草稿' : hasCurrentSubmission ? '更正正式成果' : '提交作业'}</summary>
       <div className={teachingStyles.editorContent}>{form}</div>
     </details>
   </>;

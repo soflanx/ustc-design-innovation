@@ -28,6 +28,7 @@ npm run dev
 
 ## 文档与检查
 
+- [整体设计稿：目标、使用过程、架构与实施计划](course-platform/docs/platform-design.md)
 - [每次改网站时的体验走查](course-platform/docs/experience-review.md)
 - [应用说明、操作流程与测试命令](course-platform/README.md)
 - [创建课次、写 Markdown 与插入作业和资料](course-platform/docs/course-page-editor.md)

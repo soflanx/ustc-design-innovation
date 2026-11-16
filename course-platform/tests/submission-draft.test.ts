@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { SubmissionContext } from '../src/lib/submission-contract';
-import { confirmSubmissionDraft, draftAfterRejectedSubmission, editSubmissionDraft, newSubmissionDraft, restoreSubmissionDraft, revisionDraftAction, submissionReviewReasons } from '../src/lib/submission-draft';
+import { confirmSubmissionDraft, draftAfterRejectedSubmission, editSubmissionDraft, newSubmissionDraft, restoreSubmissionDraft, revisionDraftAction, submissionReviewReasons, writeStoredSubmissionDraft } from '../src/lib/submission-draft';
 
 const requestId = '00000000-0000-4000-8000-000000000001';
 const nextRequestId = '00000000-0000-4000-8000-000000000002';
@@ -20,6 +20,8 @@ test('从版本反馈起草只使用当前归属仍可读取的最新版，已�
   const edited = editSubmissionDraft(blank, '我已经改了一半', nextRequestId);
   assert.equal(revisionDraftAction(edited, live, first.id, true), 'continue');
   assert.equal(revisionDraftAction({ ...blank, pendingAttempt: true }, live, first.id, true), 'continue');
+  assert.equal(revisionDraftAction({ ...blank, uploadNames: ['新附件.pdf'] }, live, first.id, true), 'continue');
+  assert.equal(revisionDraftAction({ ...blank, retainedFileIds: [] }, live, first.id, true), 'continue');
   assert.equal(revisionDraftAction({ ...blank, confirmation: null }, live, first.id, true), 'continue');
   assert.equal(revisionDraftAction(blank, { ...context(3), latestSubmission: first }, first.id, true), 'continue');
   assert.equal(revisionDraftAction(blank, { ...live, canSubmit: false }, first.id, true), null);
@@ -87,6 +89,44 @@ test('结果未确认的提交恢复相同请求与上下文，改正文才开�
   assert.equal(edited.requestId, nextRequestId);
   assert.equal(edited.pendingAttempt, false);
   assert.deepEqual(edited.confirmation, restored.confirmation);
+});
+
+test('旧标签的进度、拒绝和成功回执只能更新它读到的同一份本地草稿', () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value); },
+    removeItem: (key: string) => { values.delete(key); },
+  };
+  const key = 'student:offering:assignment';
+  const blank = newSubmissionDraft(requestId, context());
+  const draft = { ...blank, body: '正在整理报告', uploadNames: ['报告.pdf'] };
+  const saved = writeStoredSubmissionDraft(storage, key, null, draft);
+  assert.ok(saved);
+  assert.equal(writeStoredSubmissionDraft(storage, key, null, blank), undefined);
+  assert.equal(storage.getItem(key), saved);
+
+  const uploading = { ...draft, uploadingFileIds: [nextRequestId] };
+  const progress = writeStoredSubmissionDraft(storage, key, saved, uploading);
+  assert.ok(progress);
+  const attempt = { ...draft, stagedFileIds: [nextRequestId], retainedFileIds: [], pendingAttempt: true };
+  const pending = writeStoredSubmissionDraft(storage, key, progress, attempt);
+  assert.ok(pending);
+  // Confirming newer requirements in the other tab keeps the request ID.
+  const newer = confirmSubmissionDraft(attempt, context(3));
+  const confirmed = writeStoredSubmissionDraft(storage, key, pending, newer);
+  assert.ok(confirmed);
+  assert.equal(newer.requestId, attempt.requestId);
+
+  assert.equal(writeStoredSubmissionDraft(storage, key, progress, uploading), undefined);
+  assert.equal(writeStoredSubmissionDraft(storage, key, pending, { ...attempt, pendingAttempt: false }), undefined);
+  assert.equal(writeStoredSubmissionDraft(storage, key, pending, null), undefined);
+  assert.equal(storage.getItem(key), confirmed);
+
+  const retried = writeStoredSubmissionDraft(storage, key, confirmed, { ...newer, pendingAttempt: true });
+  assert.ok(retried);
+  assert.equal(writeStoredSubmissionDraft(storage, key, retried, null), null);
+  assert.equal(storage.getItem(key), null);
 });
 
 test('无权读取的最新提交仍能通过不透明标识发现变化，不需要旧版正文', () => {

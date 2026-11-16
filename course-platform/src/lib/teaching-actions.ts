@@ -7,7 +7,8 @@ import { readResourceUpload } from './resource-file';
 import { DomainError } from './management';
 import { refreshTeaching, runCourseAction } from './action-utils';
 import { parseTeachingDateInput } from './teaching-format';
-import { addFeedback, AssignmentRevisionConflictError, createAssignment, submitAssignment, SubmissionConflictError, ReviewRevisionConflictError, setSubmissionCorrectionWindow, setSubmissionReviewState, updateAssignment, type AssignmentInput } from './teaching';
+import { SubmissionUploadUnavailableError } from './submission-upload-store';
+import { addFeedback, AssignmentRevisionConflictError, createAssignment, submitAssignment, SubmissionBlockedError, SubmissionConflictError, ReviewRevisionConflictError, setSubmissionCorrectionWindow, setSubmissionReviewState, updateAssignment, type AssignmentInput } from './teaching';
 
 function assignmentValues(form: FormData): AssignmentInput {
   let dueAt: Date | null;
@@ -67,8 +68,10 @@ export async function submitAssignmentAction(offeringId: string, assignmentId: s
     try {
       const attachments = form.getAll('attachments');
       const retained = form.getAll('retainedFileIds');
-      if (attachments.length + retained.length > MAX_SUBMISSION_FILES
-        || attachments.some(file => typeof file === 'string') || retained.some(id => typeof id !== 'string')) {
+      const stagedFileIds = form.getAll('stagedFileIds');
+      if (attachments.length + retained.length + stagedFileIds.length > MAX_SUBMISSION_FILES
+        || attachments.some(file => typeof file === 'string') || retained.some(id => typeof id !== 'string')
+        || stagedFileIds.some(id => typeof id !== 'string')) {
         throw new DomainError('提交附件无效或超过数量上限。');
       }
       const files = (attachments as File[]).filter(file => file.name || file.size);
@@ -79,7 +82,7 @@ export async function submitAssignmentAction(offeringId: string, assignmentId: s
         if (upload) uploads.push(upload);
       }
       const version = await submitAssignment(userId, offeringId, assignmentId, {
-        body: String(form.get('body') ?? ''), uploads, retainedFileIds: retained as string[],
+        body: String(form.get('body') ?? ''), uploads, retainedFileIds: retained as string[], stagedFileIds: stagedFileIds as string[],
         requestId: String(form.get('requestId') ?? ''),
         expectedGroupId: String(form.get('expectedGroupId') ?? '') || null,
         expectedAssignmentRevision: Number(form.get('expectedAssignmentRevision')),
@@ -94,6 +97,8 @@ export async function submitAssignmentAction(offeringId: string, assignmentId: s
       if (error instanceof SubmissionConflictError) return {
         error: error.message, conflict: { reasons: error.reasons, context: error.submissionContext },
       };
+      if (error instanceof SubmissionBlockedError) return { error: error.message, blocked: error.submissionContext };
+      if (error instanceof SubmissionUploadUnavailableError) return { error: error.message, resetUpload: true };
       throw error;
     }
   }, signedOutSubmission);

@@ -3,8 +3,13 @@ import { Prisma, type AssignmentMode, type AssignmentStatus, type SubmissionRevi
 import { db } from './db';
 import { DomainError } from './management';
 import { canManageOffering, canViewOffering } from './policy';
+import { storedFileFromRow, storedFileSelect } from './stored-file';
+import { loadStagedSubmissionFiles, markStagedFilesSubmitted, SubmissionUploadUnavailableError } from './submission-upload-store';
 import { submissionRequirementText } from './submission-requirement-text';
-import { MAX_SUBMISSION_FILES, MAX_SUBMISSION_FILE_BYTES, type SubmissionAttachment, type SubmissionContext, type SubmissionConflictReason, type SubmissionInput } from './submission-contract';
+import {
+  MAX_FORMAL_SUBMISSION_FILE_BYTES, MAX_SUBMISSION_FILES, MAX_SUBMISSION_FILE_BYTES,
+  type SubmissionAttachment, type SubmissionBlockedContext, type SubmissionContext, type SubmissionConflictReason, type SubmissionInput,
+} from './submission-contract';
 
 type Tx = Prisma.TransactionClient;
 
@@ -492,6 +497,15 @@ export class SubmissionConflictError extends DomainError {
   }
 }
 
+export class SubmissionBlockedError extends DomainError {
+  readonly submissionContext: SubmissionBlockedContext;
+
+  constructor(context: SubmissionContext, reason: string) {
+    super(reason);
+    this.submissionContext = { ...context, canSubmit: false, blockedReason: reason };
+  }
+}
+
 async function submissionContext(tx: Tx, access: Context, assignment: AssignmentView, group: { id: string; name: string } | null): Promise<SubmissionContext | null> {
   if (access.member?.role !== 'STUDENT' || access.member.status !== 'ACTIVE') return null;
   const owner = assignment.mode === 'INDIVIDUAL'
@@ -634,25 +648,48 @@ export async function changeAssignmentStatus(userId: string, offeringId: string,
   });
 }
 
+export async function requireSubmissionUploadAccess(userId: string, offeringId: string, assignmentId: string) {
+  return transactional(async tx => {
+    const access = await context(tx, userId, offeringId);
+    if (access.member?.role !== 'STUDENT' || access.member.status !== 'ACTIVE') {
+      throw new DomainError('仅本期在读学生可以上传作业附件。');
+    }
+    const assignment = await visibleAssignment(tx, access, assignmentId);
+    const group = assignment.mode === 'GROUP' ? await currentGroup(tx, access) : null;
+    const owner = assignment.mode === 'INDIVIDUAL' ? { courseMemberId: access.member.id } : group ? { groupId: group.id } : null;
+    const now = new Date();
+    const limit = owner && assignment.dueAt && now >= assignment.dueAt ? await tx.submission.findFirst({
+      where: {
+        assignmentId, offeringId, ...owner, versions: { some: { finalizedAt: { not: null } } },
+      },
+      select: { correctionUntil: true },
+    }) : null;
+    const reason = submissionBlockedReason(access, assignment, group, now, limit?.correctionUntil ?? null);
+    if (reason) throw new DomainError(reason);
+  });
+}
+
 export async function submitAssignment(userId: string, offeringId: string, assignmentId: string, input: SubmissionInput) {
   const body = text(input?.body, '提交说明', 12000, false);
   const retainedFileIds = input.retainedFileIds ?? [];
   const uploads = input.uploads ?? [];
-  if (!Array.isArray(retainedFileIds) || !Array.isArray(uploads)
-    || retainedFileIds.length + uploads.length > MAX_SUBMISSION_FILES
+  const stagedFileIds = input.stagedFileIds ?? [];
+  if (!Array.isArray(retainedFileIds) || !Array.isArray(uploads) || !Array.isArray(stagedFileIds)
+    || retainedFileIds.length + uploads.length + stagedFileIds.length > MAX_SUBMISSION_FILES
     || retainedFileIds.some(id => typeof id !== 'string' || !id || id.length > 200)
     || new Set(retainedFileIds).size !== retainedFileIds.length
+    || stagedFileIds.some(id => typeof id !== 'string' || !/^[a-f\d]{8}-[a-f\d]{4}-[1-8][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/.test(id))
+    || new Set(stagedFileIds).size !== stagedFileIds.length
     || uploads.some(file => !file || typeof file.name !== 'string' || !file.name.trim() || file.name.length > 255
       || !(file.bytes instanceof Uint8Array) || !file.bytes.length)) {
     throw new DomainError('提交附件无效或超过数量上限。');
   }
-  if (!body && !retainedFileIds.length && !uploads.length) throw new DomainError('请填写说明或添加至少一个附件。');
+  if (!body && !retainedFileIds.length && !uploads.length && !stagedFileIds.length) {
+    throw new DomainError('请填写说明或添加至少一个附件。');
+  }
   const uploadBytes = uploads.reduce((total, file) => total + file.bytes.length, 0);
   if (uploadBytes > MAX_SUBMISSION_FILE_BYTES) throw new DomainError('附件合计不能超过 10 MiB。');
-  const fingerprint = createHash('sha256').update(JSON.stringify({
-    body, retainedFileIds: [...retainedFileIds].sort(),
-    uploads: uploads.map(file => [file.name, createHash('sha256').update(file.bytes).digest('hex')]),
-  })).digest('hex');
+  const inlineFingerprints = uploads.map(file => [file.name, createHash('sha256').update(file.bytes).digest('hex')]);
   if (typeof input?.requestId !== 'string' || !/^[\da-f]{8}-[\da-f]{4}-[1-8][\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(input.requestId)) {
     throw new DomainError('提交标识无效，请重新打开作业页面。');
   }
@@ -666,16 +703,23 @@ export async function submitAssignment(userId: string, offeringId: string, assig
       where: { id: requestId },
       select: { ...versionSelect, requestFingerprint: true, submittedById: true, submission: { select: { assignmentId: true } } },
     });
+    if (existing && (existing.offeringId !== offeringId || existing.submission.assignmentId !== assignmentId
+      || existing.submittedById !== access.member.id || !existing.finalizedAt)) {
+      throw new DomainError('提交标识已被使用，请重新打开页面后提交。');
+    }
+    const staged = stagedFileIds.length ? await loadStagedSubmissionFiles(tx, userId, offeringId, assignmentId, stagedFileIds) : [];
+    const fingerprint = createHash('sha256').update(JSON.stringify({
+      body, retainedFileIds: [...retainedFileIds].sort(), uploads: inlineFingerprints,
+      ...(staged.length ? { staged: staged.map(file => [file.name, file.size, file.digest]) } : {}),
+    })).digest('hex');
     if (existing) {
-      if (existing.offeringId !== offeringId || existing.submission.assignmentId !== assignmentId
-        || existing.submittedById !== access.member.id || !existing.finalizedAt
-        || (existing.requestFingerprint ? existing.requestFingerprint !== fingerprint : existing.body !== body || retainedFileIds.length || uploads.length)) {
+      if (existing.requestFingerprint ? existing.requestFingerprint !== fingerprint
+        : existing.body !== body || retainedFileIds.length || uploads.length || staged.length) {
         throw new DomainError('提交标识已被使用，请重新打开页面后提交。');
       }
       const { submittedById: _submittedById, submission: _submission, requestFingerprint: _fingerprint, ...version } = existing;
       return versionView(version);
     }
-    requireWritable(access);
     confirmedSubmission(input);
     // Keep the requirements stable until this submit transaction commits.
     // A concurrent teacher update either precedes this read or waits for it.
@@ -688,7 +732,10 @@ export async function submitAssignment(userId: string, offeringId: string, assig
     if (input.expectedAssignmentRevision !== current.confirmation.assignmentRevision) reasons.push('requirements');
     if (input.expectedLatestSubmissionToken !== current.confirmation.latestSubmissionToken) reasons.push('latest_submission');
     if (reasons.length) throw new SubmissionConflictError(reasons, current);
-    if (!current.canSubmit) throw new DomainError(current.blockedReason!);
+    if (current.blockedReason) throw new SubmissionBlockedError(current, current.blockedReason);
+    if (staged.some(file => file.expired || file.alreadySubmitted)) {
+      throw new SubmissionUploadUnavailableError();
+    }
     const participantIds = assignment.mode === 'INDIVIDUAL' ? [access.member.id] : (await tx.groupMember.findMany({
       where: {
         offeringId, groupId: group!.id, leftAt: null,
@@ -706,15 +753,17 @@ export async function submitAssignment(userId: string, offeringId: string, assig
     });
     const now = new Date();
     const blocked = submissionBlockedReason(access, assignment, group, now, latest?.finalizedAt ? submission.correctionUntil : null);
-    if (blocked) throw new DomainError(blocked);
+    if (blocked) throw new SubmissionBlockedError({ ...current, correctionUntil: null }, blocked);
     const retained = retainedFileIds.length && current.latestSubmission
       ? await tx.submissionFile.findMany({ where: {
         offeringId, versionId: current.latestSubmission.id, fileId: { in: retainedFileIds },
       }, select: { fileId: true, file: { select: { sizeBytes: true } } } })
       : [];
     if (retained.length !== retainedFileIds.length) throw new DomainError('只能保留本次更正所依据成果中的附件。');
-    if (retained.reduce((total, row) => total + Number(row.file.sizeBytes), uploadBytes) > MAX_SUBMISSION_FILE_BYTES) {
-      throw new DomainError('保留与新增附件合计不能超过 10 MiB。');
+    const size = retained.reduce((total, row) => total + Number(row.file.sizeBytes), uploadBytes)
+      + staged.reduce((total, file) => total + file.size, 0);
+    if (size > MAX_FORMAL_SUBMISSION_FILE_BYTES) {
+      throw new DomainError('保留与新增附件合计不能超过 200 MiB。');
     }
     const specification = await ensureCurrentRevision(tx, assignment);
     const version = await tx.submissionVersion.create({
@@ -732,7 +781,8 @@ export async function submitAssignment(userId: string, offeringId: string, assig
       }, select: { id: true } });
       uploadedIds.push(stored.id);
     }
-    const fileIds = [...retainedFileIds, ...uploadedIds];
+    if (staged.length) await markStagedFilesSubmitted(tx, stagedFileIds);
+    const fileIds = [...retainedFileIds, ...uploadedIds, ...staged.map(file => file.id)];
     if (fileIds.length) await tx.submissionFile.createMany({
       data: fileIds.map(fileId => ({ offeringId, versionId: version.id, fileId })),
     });
@@ -740,7 +790,7 @@ export async function submitAssignment(userId: string, offeringId: string, assig
     // mutable record; it must never rewrite this immutable content snapshot.
     const finalizedAt = new Date();
     const finalBlock = submissionBlockedReason(access, assignment, group, finalizedAt, latest?.finalizedAt ? submission.correctionUntil : null);
-    if (finalBlock) throw new DomainError(finalBlock);
+    if (finalBlock) throw new SubmissionBlockedError({ ...current, correctionUntil: null }, finalBlock);
     const finalized = await tx.submissionVersion.update({ where: { id: version.id }, data: { finalizedAt }, select: versionSelect });
     await tx.submissionVersionReview.create({ data: { versionId: version.id, offeringId, state: 'PENDING', revision: 1 } });
     await tx.submissionReviewEvent.create({ data: { versionId: version.id, offeringId, revision: 1, state: 'PENDING', actorId: null } });
@@ -941,8 +991,8 @@ export async function getSubmissionAttachment(userId: string, offeringId: string
       where: { offeringId, versionId, fileId, version: {
         ...versionVisibility(access), submission: { assignmentId, assignment: assignmentVisibility(access) },
       } },
-      select: { file: { select: { originalName: true, bytes: true } } },
+      select: { file: { select: storedFileSelect } },
     });
-    return file?.file.bytes ? { name: file.file.originalName, bytes: file.file.bytes } : null;
+    return file ? storedFileFromRow(file.file) : null;
   });
 }

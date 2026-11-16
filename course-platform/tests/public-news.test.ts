@@ -2,7 +2,7 @@ import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { db } from '../src/lib/db';
-import { getPublicCourseNews, getPublicOfferingNews, getPublicProjects, getPublishedPost } from '../src/lib/queries';
+import { getLegacyPublicProjects, getPublicCourseNews, getPublicOfferingNews, getPublishedPost } from '../src/lib/queries';
 
 assert.match(new URL(process.env.DATABASE_URL ?? 'postgresql://invalid/').pathname, /^\/design_test_[a-f\d]+$/);
 after(async () => { await db.$disconnect(); });
@@ -154,7 +154,7 @@ test('开课报道按每次请求的发布时间、开课状态和撤回结果�
   assert.deepEqual(await getPublicOfferingNews(offering.id), expected);
 });
 
-test('项目归档只列已公开的项目记录，筹备中的开课不随项目带出', async () => {
+test('过往项目文章仍可读，归档只返回公开文章的卡片字段', async () => {
   const key = randomUUID();
   const author = await db.user.create({ data: { name: '项目作者', email: `${key}@test.invalid` } });
   const course = await db.course.create({ data: { slug: key, title: '项目测试课程' } });
@@ -176,11 +176,10 @@ test('项目归档只列已公开的项目记录，筹备中的开课不随项�
   await post('members-only', { visibility: 'OFFERING', offeringId: archived.id });
   await post('future', { publishedAt: new Date('2999-01-01') });
 
-  const mine = (await getPublicProjects()).filter(project => project.slug.startsWith(key));
+  const mine = (await getLegacyPublicProjects()).filter(project => project.slug.startsWith(key));
   assert.deepEqual(mine.map(project => project.slug), ['archived', 'draft-offering', 'unbound'].map(name => `${key}-${name}`));
-  assert.deepEqual(mine[0].offering, { id: archived.id, title: archived.title, term: { name: term.name }, course: { slug: course.slug, title: course.title } });
-  assert.equal(mine[1].offering, null, '筹备中的开课不能随公开项目带出');
-  assert.equal(mine[2].offering, null);
-  assert.deepEqual(Object.keys(mine[0]).sort(), ['coverLabel', 'excerpt', 'offering', 'publishedAt', 'slug', 'title']);
-  assert.equal((await getPublicProjects(1)).length, 1);
+  assert.deepEqual(Object.keys(mine[0]).sort(), ['excerpt', 'slug', 'title']);
+  assert.deepEqual((await getPublishedPost(mine[0].slug))?.offering, { id: archived.id, title: archived.title });
+  assert.equal((await getPublishedPost(mine[1].slug))?.offering, null, '筹备中的开课不能随公开项目文章带出');
+  assert.equal((await getPublishedPost(mine[2].slug))?.body, '正文');
 });

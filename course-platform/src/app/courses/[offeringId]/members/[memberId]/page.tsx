@@ -6,16 +6,16 @@ import { TeachingObservationForm } from '@/components/teaching-observation-form'
 import styles from '@/components/teaching-history.module.css';
 import { requireOfferingAccess } from '@/lib/access';
 import { getGroupActivitySource } from '@/lib/course-subpages';
-import { courseLessonHref, groupWorkHref, parseGroupSource } from '@/lib/group-work-link';
+import { courseLessonHref, groupWorkHref, parseGroupSource, parseLessonRecordOrigin, setLessonRecordOrigin, type LessonRecordOriginQuery } from '@/lib/group-work-link';
 import { DomainError } from '@/lib/management';
 import { displayDate } from '@/lib/policy';
 import { getTeachingHistory, teachingMemberSearch } from '@/lib/teaching-history';
 
 export default async function MemberTeachingPage({ params, searchParams }: {
   params: Promise<{ offeringId: string; memberId: string }>;
-  searchParams: Promise<{
+  searchParams: Promise<LessonRecordOriginQuery & {
     fromPage?: string | string[]; fromGroup?: string | string[]; fromRecords?: string | string[];
-    fromRecordsMember?: string | string[]; fromLessonRecords?: string | string[]; q?: string | string[];
+    fromRecordsMember?: string | string[]; q?: string | string[];
     includeWithdrawn?: string | string[];
   }>;
 }) {
@@ -25,7 +25,7 @@ export default async function MemberTeachingPage({ params, searchParams }: {
   const requestedGroup = parseGroupSource(query.fromGroup);
   const fromRecords = query.fromRecords === '1';
   const fromRecordsMember = fromRecords && query.fromRecordsMember === '1';
-  const fromLessonRecords = Boolean(requestedPage && query.fromLessonRecords === '1');
+  const requestedLessonRecords = requestedPage ? parseLessonRecordOrigin(query) : undefined;
   const includeWithdrawn = query.includeWithdrawn === '1';
   const search = teachingMemberSearch(query.q);
   const base = `/courses/${encodeURIComponent(offeringId)}`;
@@ -35,7 +35,7 @@ export default async function MemberTeachingPage({ params, searchParams }: {
   if (requestedGroup) returnTo.set('fromGroup', requestedGroup);
   if (fromRecords) returnTo.set('fromRecords', '1');
   if (fromRecordsMember) returnTo.set('fromRecordsMember', '1');
-  if (fromLessonRecords) returnTo.set('fromLessonRecords', '1');
+  setLessonRecordOrigin(returnTo, requestedLessonRecords);
   if (search) returnTo.set('q', search);
   const withdrawnQuery = new URLSearchParams(returnTo);
   withdrawnQuery.set('includeWithdrawn', '1');
@@ -51,7 +51,7 @@ export default async function MemberTeachingPage({ params, searchParams }: {
   const { member } = history;
   if (!member) notFound();
   const source = await getGroupActivitySource(user, offeringId, requestedPage, membership.role);
-  const lessonRecords = Boolean(source && fromLessonRecords);
+  const lessonRecords = source ? requestedLessonRecords : undefined;
   const priorGroup = member.groupMemberships.find(item => item.group.id === requestedGroup)?.group;
   const currentGroup = member.status === 'ACTIVE' ? member.groupMemberships.find(item => !item.leftAt)?.group : undefined;
   const formerMemberships = member.groupMemberships.filter(item => item.leftAt);
@@ -63,18 +63,17 @@ export default async function MemberTeachingPage({ params, searchParams }: {
   const membersHref = `${base}/members${search ? `?${new URLSearchParams({ q: search })}` : ''}`;
   const origin = new URLSearchParams({ fromMember: member.id });
   if (source) origin.set('fromPage', source.id);
-  if (lessonRecords) origin.set('fromLessonRecords', '1');
+  setLessonRecordOrigin(origin, lessonRecords);
   if (priorGroup) origin.set('fromGroup', priorGroup.id);
   if (fromRecords) origin.set('fromRecords', '1');
   if (fromRecordsMember) origin.set('fromRecordsMember', '1');
   if (search) origin.set('fromMemberSearch', search);
-  const groupHref = (groupId: string) => `${groupWorkHref(offeringId, undefined, groupId)}?${origin}`;
-  const priorGroupQuery = new URLSearchParams();
-  if (source) priorGroupQuery.set('fromPage', source.id);
-  if (lessonRecords) priorGroupQuery.set('fromLessonRecords', '1');
-  const priorGroupHref = priorGroup && `${groupWorkHref(offeringId, undefined, priorGroup.id)}${priorGroupQuery.size ? `?${priorGroupQuery}` : ''}`;
+  const groupOrigin = new URLSearchParams(origin);
+  if (includeWithdrawn) groupOrigin.set('fromMemberWithdrawn', '1');
+  const groupHref = (groupId: string) => `${groupWorkHref(offeringId, undefined, groupId)}?${groupOrigin}`;
+  const priorGroupHref = priorGroup && groupWorkHref(offeringId, source?.id, priorGroup.id, lessonRecords);
 
-  return <CourseFrame user={user} offering={offering} membership={membership} active="members" groupSourcePageId={source?.id}>
+  return <CourseFrame user={user} offering={offering} membership={membership} active="members" groupSourcePageId={source?.id} groupSourceLessonRecords={lessonRecords}>
     <div className={styles.reading}>
       <div className="inline-actions">
         {fromRecords && <Link className="breadcrumb" href={recordsHref}>← 返回课堂记录</Link>}
